@@ -1,0 +1,25 @@
+# ── Node ─────────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ── Environment (NEVER commit these) ─────────────────────────
+.env
+.env.local
+.env.*.local
+backend/.env
+
+# ── OS files ─────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Editor ───────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── Uploads / temp files ─────────────────────────────────────
+backend/uploads/
+*.log
