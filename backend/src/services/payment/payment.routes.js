@@ -36,10 +36,8 @@ router.post('/rides/:rideId/cash/confirm', requireRole('driver'), [
 // GET /api/v1/payments/ratings/my
 router.get('/ratings/my', controller.getUserRatings);
 
-// GET /api/v1/payments/rides/:rideId/ratings/pending
-router.get('/rides/:rideId/ratings/pending', [
-  param('rideId').isUUID(),
-], controller.getPendingRatings);
+// GET /api/v1/payments/ratings/pending — all rides awaiting a rating from this user
+router.get('/ratings/pending', controller.getPendingRatings);
 
 // GET /api/v1/payments/rides/:rideId/ratings
 router.get('/rides/:rideId/ratings', [

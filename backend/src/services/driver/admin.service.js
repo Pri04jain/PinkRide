@@ -13,8 +13,7 @@ const getDriverQueue = async ({ status = 'under_review', page = 1, limit = 20 } 
       vehicle_color, vehicle_year,
       approval_status, rejection_reason,
       license_doc_url, vehicle_rc_url, vehicle_insurance_url,
-      created_at, updated_at,
-      users!inner(full_name, phone, face_verified, gender)
+      created_at, updated_at
     `, { count: 'exact' })
     .order('created_at', { ascending: true })
     .range((page - 1) * limit, page * limit - 1);
@@ -24,14 +23,22 @@ const getDriverQueue = async ({ status = 'under_review', page = 1, limit = 20 } 
   }
 
   const { data, error, count } = await query;
-
   if (error) throw new AppError('Failed to fetch driver queue.', 500);
 
+  // Fetch user info separately for each driver (avoids Supabase join ambiguity)
+  const drivers = await Promise.all((data || []).map(async (driver) => {
+    const { data: user } = await supabase
+      .from('users')
+      .select('full_name, phone, face_verified, gender')
+      .eq('id', driver.user_id)
+      .single();
+    return { ...driver, users: user || {} };
+  }));
+
   return {
-    drivers: data || [],
+    drivers,
     pagination: {
-      page,
-      limit,
+      page, limit,
       total: count || 0,
       pages: Math.ceil((count || 0) / limit),
     },

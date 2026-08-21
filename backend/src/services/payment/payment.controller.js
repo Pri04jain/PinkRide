@@ -67,7 +67,7 @@ const submitRating = async (req, res, next) => {
 
 const getPendingRatings = async (req, res, next) => {
   try {
-    const pending = await ratingService.getPendingRatings(req.user.id, req.params.rideId);
+    const pending = await ratingService.getPendingRatings(req.user.id);
     return success(res, { pending });
   } catch (err) { next(err); }
 };

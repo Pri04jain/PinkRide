@@ -7,6 +7,25 @@ const { upload, handleUploadError } = require('../../shared/middleware/upload');
 
 const router = express.Router();
 
+// ─── Driver Ride-Request Routes ───────────────────────────────────────────────
+
+// GET /api/v1/drivers/ride-requests — list nearby open rides for an online driver
+router.get(
+  '/ride-requests',
+  authenticate,
+  requireRole('driver'),
+  driverController.getNearbyRideRequests
+);
+
+// POST /api/v1/drivers/ride-requests/:rideId/accept — driver accepts a specific ride
+router.post(
+  '/ride-requests/:rideId/accept',
+  authenticate,
+  requireRole('driver'),
+  [param('rideId').isUUID().withMessage('Invalid ride ID')],
+  driverController.acceptRide
+);
+
 // ─── Driver Routes (role: driver) ─────────────────────────────────────────────
 
 // POST /api/v1/drivers/register

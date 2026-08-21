@@ -328,6 +328,33 @@ CREATE TABLE otp_logs (
   expires_at  TIMESTAMPTZ NOT NULL
 );
 
+-- ============================================================
+-- DEVICE TOKENS
+-- Stores FCM push-notification tokens per user device.
+-- One user can have multiple devices (phone + tablet).
+-- Token is upserted on login so it stays current.
+-- ============================================================
+
+CREATE TABLE device_tokens (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  fcm_token   TEXT NOT NULL,
+  platform    VARCHAR(10) NOT NULL CHECK (platform IN ('android', 'ios')),
+  is_active   BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  -- One token string maps to exactly one row
+  UNIQUE(fcm_token)
+);
+
+CREATE INDEX idx_device_tokens_user ON device_tokens(user_id) WHERE is_active = TRUE;
+
+-- Auto-update updated_at on token refresh
+CREATE TRIGGER update_device_tokens_updated_at
+  BEFORE UPDATE ON device_tokens
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
 CREATE INDEX idx_otp_logs_phone ON otp_logs(phone);
 
 -- ============================================================

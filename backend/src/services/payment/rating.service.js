@@ -117,4 +117,87 @@ const getRideRatings = async (rideId) => {
   return data || [];
 };
 
-module.exports = { submitRating, getUserRatings, getRideRatings, VALID_TAGS };
+// ─── Get Pending Ratings ──────────────────────────────────────────────────────
+// Returns completed rides where the calling user was a participant but has
+// not yet submitted a rating for the other party.
+// The Flutter app polls this after a trip ends to prompt the rating screen.
+
+const getPendingRatings = async (userId) => {
+  // Find all completed rides this user was part of (as passenger OR driver)
+  const [passengerRides, driverRides] = await Promise.all([
+    // Rides where user was a passenger
+    supabase
+      .from('ride_passengers')
+      .select('ride_id, rides!inner(id, status, driver_id, ended_at, drivers!inner(user_id, users!inner(full_name)))')
+      .eq('passenger_id', userId)
+      .eq('rides.status', 'completed')
+      .not('rides.driver_id', 'is', null),
+
+    // Rides where user was the driver
+    supabase
+      .from('rides')
+      .select('id, ended_at, drivers!inner(user_id), ride_passengers(passenger_id, users!inner(full_name))')
+      .eq('drivers.user_id', userId)
+      .eq('status', 'completed'),
+  ]);
+
+  const pending = [];
+
+  // Check passenger → driver ratings
+  for (const rp of passengerRides.data || []) {
+    const ride = rp.rides;
+    if (!ride?.driver_id) continue;
+
+    const driverUserId = ride.drivers?.user_id;
+    if (!driverUserId) continue;
+
+    // Has this user already rated the driver for this ride?
+    const { data: existing } = await supabase
+      .from('ratings')
+      .select('id')
+      .eq('ride_id', ride.id)
+      .eq('rated_by', userId)
+      .eq('rated_user', driverUserId)
+      .maybeSingle();
+
+    if (!existing) {
+      pending.push({
+        rideId: ride.id,
+        endedAt: ride.ended_at,
+        rateUserId: driverUserId,
+        rateUserName: ride.drivers?.users?.full_name,
+        rateUserRole: 'driver',
+      });
+    }
+  }
+
+  // Check driver → passenger ratings
+  for (const ride of driverRides.data || []) {
+    for (const rp of ride.ride_passengers || []) {
+      const { data: existing } = await supabase
+        .from('ratings')
+        .select('id')
+        .eq('ride_id', ride.id)
+        .eq('rated_by', userId)
+        .eq('rated_user', rp.passenger_id)
+        .maybeSingle();
+
+      if (!existing) {
+        pending.push({
+          rideId: ride.id,
+          endedAt: ride.ended_at,
+          rateUserId: rp.passenger_id,
+          rateUserName: rp.users?.full_name,
+          rateUserRole: 'passenger',
+        });
+      }
+    }
+  }
+
+  // Sort newest first
+  pending.sort((a, b) => new Date(b.endedAt) - new Date(a.endedAt));
+
+  return pending;
+};
+
+module.exports = { submitRating, getUserRatings, getRideRatings, getPendingRatings, VALID_TAGS };

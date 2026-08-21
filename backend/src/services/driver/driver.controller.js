@@ -47,4 +47,30 @@ const updateLocation = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { registerDriver, uploadDocument, getProfile, setAvailability, updateLocation };
+// GET /api/v1/drivers/ride-requests — driver sees nearby open rides
+const getNearbyRideRequests = async (req, res, next) => {
+  try {
+    const result = await driverService.getNearbyRideRequests(req.user.id);
+    return success(res, result, `${result.count} ride request(s) nearby.`);
+  } catch (err) { next(err); }
+};
+
+// POST /api/v1/drivers/ride-requests/:rideId/accept — driver accepts a ride
+const acceptRide = async (req, res, next) => {
+  try {
+    const errs = validationResult(req);
+    if (!errs.isEmpty()) return error(res, 'Validation failed', 422, errs.array());
+    const result = await driverService.acceptRide(req.user.id, req.params.rideId);
+    return success(res, result, result.message);
+  } catch (err) { next(err); }
+};
+
+module.exports = {
+  registerDriver,
+  uploadDocument,
+  getProfile,
+  setAvailability,
+  updateLocation,
+  getNearbyRideRequests,
+  acceptRide,
+};

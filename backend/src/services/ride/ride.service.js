@@ -331,17 +331,22 @@ const cancelRide = async (userId, rideId, reason, cancelledBy = 'passenger') => 
   if (cancelledBy === 'driver' && ride.driver_id) {
     const { data: driver } = await supabase
       .from('drivers')
-      .select('user_id, users!inner(wallet_balance)')
+      .select('user_id, users!inner(wallet_balance, cancellation_count, reliability_score)')
       .eq('id', ride.driver_id)
       .single();
 
     if (driver) {
       const driverUserId = driver.user_id;
       const driverBalance = parseFloat(driver.users?.wallet_balance || 0);
+      const currentCancelCount = parseInt(driver.users?.cancellation_count || 0);
+      const currentReliability = parseFloat(driver.users?.reliability_score || 5);
+
+      // Deduct fine from wallet (floor at 0), increment cancellation count,
+      // apply -0.3 reliability penalty (floor at 0) — all plain JS, no Supabase RPC
       await supabase.from('users').update({
         wallet_balance: Math.max(0, driverBalance - DRIVER_FINE),
-        reliability_score: supabase.rpc('greatest', { a: 0, b: driverBalance - 0.3 }), // handled in DB
-        cancellation_count: supabase.raw('cancellation_count + 1'),
+        cancellation_count: currentCancelCount + 1,
+        reliability_score: Math.max(0, Math.round((currentReliability - 0.3) * 100) / 100),
       }).eq('id', driverUserId);
 
       await supabase.from('fines').insert({

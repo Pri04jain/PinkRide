@@ -1,30 +1,70 @@
 /**
  * FCM Push Notification Service
  *
- * Day 1 status: Stubbed out — logs to console in dev.
- * Firebase Admin SDK is removed for now (it required a service account JSON file).
+ * Token storage: Persisted to `device_tokens` table in Supabase.
+ * One user can have multiple active tokens (phone + tablet).
+ * Tokens are upserted on every login so they stay current.
  *
- * Why removed for now?
- * firebase-admin pulls in a large SDK and needs a service account file that
- * doesn't exist yet. For Days 1–7, console logs are fine.
- * We'll wire up real push notifications on Day 9 (safety/notifications day).
- *
- * Upgrade path: Add firebase-admin back, set FIREBASE_SERVICE_ACCOUNT_PATH in .env.
+ * Push delivery:
+ *   dev  → console.log (no Firebase SDK needed)
+ *   prod → wire up firebase-admin here on Day 9
+ *          (set FIREBASE_SERVICE_ACCOUNT_PATH in .env, npm i firebase-admin)
  */
 
-// In-memory token store (per-process, cleared on restart)
-// In production, store these in the users table or a device_tokens table in Supabase
-const deviceTokens = new Map(); // userId -> fcmToken
+const { supabase } = require('../../shared/db/client');
 
-const registerDeviceToken = async (userId, fcmToken) => {
-  deviceTokens.set(userId, fcmToken);
+// ─── Device Token Registration ────────────────────────────────────────────────
+
+/**
+ * Register (or refresh) an FCM device token for a user.
+ * Uses upsert on fcm_token so re-registration is idempotent.
+ * Old tokens for the same user on the same platform are marked inactive.
+ */
+const registerDeviceToken = async (userId, fcmToken, platform = 'android') => {
+  // Deactivate stale tokens for this user on the same platform
+  // so we don't spam dead tokens when pushing
+  await supabase
+    .from('device_tokens')
+    .update({ is_active: false })
+    .eq('user_id', userId)
+    .eq('platform', platform)
+    .neq('fcm_token', fcmToken);
+
+  // Upsert the current token — conflict on the unique fcm_token column
+  const { error } = await supabase
+    .from('device_tokens')
+    .upsert(
+      { user_id: userId, fcm_token: fcmToken, platform, is_active: true },
+      { onConflict: 'fcm_token' }
+    );
+
+  if (error) {
+    console.error('[FCM] Failed to save device token:', error.message);
+    // Don't throw — a failed token save shouldn't break the caller (e.g. login)
+  }
+
   return { registered: true };
 };
 
 /**
- * Send a push notification to a user.
- * In dev: logs to console.
- * In production (Day 9+): sends via Firebase.
+ * Get all active FCM tokens for a user (may have multiple devices).
+ */
+const getActiveTokens = async (userId) => {
+  const { data } = await supabase
+    .from('device_tokens')
+    .select('fcm_token, platform')
+    .eq('user_id', userId)
+    .eq('is_active', true);
+
+  return (data || []).map((row) => row.fcm_token);
+};
+
+// ─── Send Push Notification ───────────────────────────────────────────────────
+
+/**
+ * Send a push notification to all active devices for a user.
+ * dev:  logs to console, returns { sent: true, dev: true }
+ * prod: wire up firebase-admin here on Day 9
  */
 const sendToUser = async (userId, title, body, data = {}) => {
   const isDev = process.env.NODE_ENV !== 'production';
@@ -34,14 +74,23 @@ const sendToUser = async (userId, title, body, data = {}) => {
     return { sent: true, dev: true };
   }
 
-  // Production: wire up Firebase here on Day 9
+  // Production path — fetch tokens from DB and send via Firebase
+  const tokens = await getActiveTokens(userId);
+  if (!tokens.length) {
+    console.warn(`[FCM] No active tokens for user ${userId}`);
+    return { sent: false, reason: 'No active device tokens' };
+  }
+
+  // TODO Day 9: Replace with real Firebase Admin SDK calls
+  // const { getMessaging } = require('firebase-admin/messaging');
+  // await getMessaging().sendEachForMulticast({ tokens, notification: { title, body }, data });
+
   console.warn('[FCM] Production push not yet configured.');
   return { sent: false, reason: 'FCM not configured' };
 };
 
-/**
- * Pre-built notification templates used across services.
- */
+// ─── Notification Templates ───────────────────────────────────────────────────
+
 const notify = {
   driverApproved: (userId) =>
     sendToUser(userId, "You're Approved!", 'Your PinkRide driver account is verified. Go online and start accepting rides.', { type: 'driver_approved' }),
@@ -66,6 +115,9 @@ const notify = {
 
   fineCharged: (userId, amount, reason) =>
     sendToUser(userId, `Fine Charged: ₹${amount}`, reason, { type: 'fine', amount: String(amount) }),
+
+  newRideRequest: (driverUserId, pickupAddress, fareAmount) =>
+    sendToUser(driverUserId, 'New Ride Request', `Pickup: ${pickupAddress} — ₹${fareAmount}`, { type: 'new_ride_request' }),
 };
 
-module.exports = { registerDeviceToken, sendToUser, notify };
+module.exports = { registerDeviceToken, getActiveTokens, sendToUser, notify };

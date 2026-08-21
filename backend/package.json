@@ -8,6 +8,7 @@
     "dev": "nodemon src/app.js"
   },
   "dependencies": {
+    "@aws-sdk/client-rekognition": "^3.1110.0",
     "@supabase/supabase-js": "2.43.4",
     "axios": "1.7.2",
     "bcryptjs": "2.4.3",

@@ -24,8 +24,8 @@ const app = express();
 // Security middleware
 app.use(helmet());
 app.use(cors({
-  origin: process.env.ALLOWED_ORIGINS?.split(',') || '*',
-  credentials: true,
+  origin: '*',
+  credentials: false,
 }));
 
 // Rate limiting - global
@@ -72,6 +72,13 @@ app.use(errorHandler);
 const PORT = process.env.PORT || 3000;
 const server = app.listen(PORT, () => {
   console.log(`PinkRide API running on port ${PORT} [${process.env.NODE_ENV || 'development'}]`);
+});
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`Port ${PORT} is busy. Run this to fix it:\n  lsof -ti:${PORT} | xargs kill -9`);
+    process.exit(1);
+  }
 });
 
 // Attach Socket.io to the HTTP server

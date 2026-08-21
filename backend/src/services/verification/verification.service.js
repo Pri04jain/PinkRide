@@ -1,21 +1,27 @@
 const { supabase } = require('../../shared/db/client');
 const { otpStore } = require('../../shared/cache/otpStore');
 const { AppError } = require('../../shared/middleware/errorHandler');
+const {
+  detectAndValidateFace,
+  indexFace,
+  compareFace,
+  deleteFace,
+  ensureCollection,
+} = require('./rekognition.service');
 
 /**
  * Face Verification Service
  *
- * Day 1 status: Stubbed — all face checks return success in dev.
- * This is intentional so the rest of the app (ride flow, OTP, payments)
- * can be built and tested without needing a face recognition service.
+ * All face operations go through rekognition.service.js which has two modes:
+ *   - Mock mode (default in dev): returns success without calling AWS.
+ *     Activates when AWS_ACCESS_KEY_ID is missing or set to 'your_aws_access_key'.
+ *   - Production mode: calls AWS Rekognition (DetectFaces, IndexFaces,
+ *     SearchFacesByImage, DeleteFaces).
  *
- * Day 3 plan: Integrate face-api.js for browser-based face detection.
- * Why face-api.js over AWS Rekognition?
- *   - Free (runs in Node.js or browser, no API cost)
- *   - No AWS account needed
- *   - Good enough accuracy for MVP
- * Upgrade path: Swap to AWS Rekognition or Azure Face API if accuracy
- * needs to improve for production.
+ * DPDP Act compliance:
+ *   - Explicit consent required before any biometric capture.
+ *   - Only the AWS faceId reference is stored — no raw photo, no embedding bytes.
+ *   - Users can delete their face data at any time (right to erasure).
  */
 
 const FACE_VERIFY_MAX_RETRIES = parseInt(process.env.FACE_VERIFY_MAX_RETRIES) || 5;
@@ -35,8 +41,10 @@ const recordConsent = async (userId) => {
 // ─── Registration Face Verification ──────────────────────────────────────────
 
 /**
- * Step 1: Validate the selfie (liveness check).
- * Day 1: always passes in dev. Day 3: wire up face-api.js here.
+ * Step 1 — Liveness check.
+ * Decodes the base64 image, calls AWS Rekognition DetectFaces (or mock),
+ * validates eyes open / no sunglasses / good pose & quality.
+ * The raw image buffer is held in otpStore for 60 s until Step 2 confirms.
  */
 const validateFaceForRegistration = async (userId, base64Image) => {
   const { data: user, error } = await supabase
@@ -48,24 +56,33 @@ const validateFaceForRegistration = async (userId, base64Image) => {
   if (error || !user) throw new AppError('User not found.', 404);
   if (!user.face_consent_given) throw new AppError('Face verification consent is required.', 403);
   if (user.face_verified) throw new AppError('Face already registered for this account.', 409);
-
   if (!base64Image) throw new AppError('Image data is required.', 400);
 
-  // Store image temporarily (60s TTL) for the confirm step
+  // Decode base64 → Buffer for Rekognition
+  const imageBuffer = Buffer.from(base64Image, 'base64');
+
+  // Liveness + quality check via Rekognition (or mock in dev)
+  const detection = await detectAndValidateFace(imageBuffer);
+
+  if (!detection.faceDetected) {
+    throw new AppError(detection.reason || 'Face not detected. Please try again.', 422);
+  }
+
+  // Keep buffer in memory (60 s TTL) so confirmFaceRegistration can index it
   const tempKey = `face_reg_pending:${userId}`;
+  // Store as base64 string (otpStore holds strings, not Buffers)
   otpStore.set(tempKey, base64Image, 60);
 
   return {
     validated: true,
-    livenessScore: 99, // placeholder until face-api.js is integrated on Day 3
+    livenessScore: detection.livenessScore,
     message: 'Face validated. Confirm to complete registration.',
   };
 };
 
 /**
- * Step 2: Confirm registration — store face reference in DB.
- * Day 1: stores a placeholder reference.
- * Day 3: will store a real face embedding ID.
+ * Step 2 — Index the face into the Rekognition collection.
+ * Stores only the faceId reference string — no raw photo persisted.
  */
 const confirmFaceRegistration = async (userId) => {
   const tempKey = `face_reg_pending:${userId}`;
@@ -75,12 +92,18 @@ const confirmFaceRegistration = async (userId) => {
     throw new AppError('Face validation session expired. Please take a new selfie.', 400);
   }
 
-  // Day 3: replace this with real face-api.js embedding/ID
-  const placeholderFaceRef = `face_ref:${userId}:${Date.now()}`;
+  // Ensure the Rekognition collection exists (idempotent)
+  await ensureCollection();
 
+  const imageBuffer = Buffer.from(base64Image, 'base64');
+
+  // Index face → get back the faceId reference
+  const { faceId } = await indexFace(imageBuffer, userId);
+
+  // Persist only the faceId reference (never the raw photo or embedding bytes)
   const { error } = await supabase
     .from('users')
-    .update({ face_embedding_ref: placeholderFaceRef, face_verified: true })
+    .update({ face_embedding_ref: faceId, face_verified: true })
     .eq('id', userId);
 
   if (error) throw new AppError('Failed to save face registration.', 500);
@@ -97,18 +120,18 @@ const confirmFaceRegistration = async (userId) => {
 
 /**
  * Verify passenger identity before a ride starts.
- * Day 1: always passes in dev.
- * Day 3: will compare live selfie against stored embedding.
+ * Compares the live selfie against the stored faceId in Rekognition.
+ * Up to FACE_VERIFY_MAX_RETRIES attempts; ride is cancelled after that.
  */
 const verifyFaceForRide = async (userId, ridePassengerId, base64Image) => {
   const { data: user, error } = await supabase
     .from('users')
-    .select('face_verified')
+    .select('face_verified, face_embedding_ref')
     .eq('id', userId)
     .single();
 
   if (error || !user) throw new AppError('User not found.', 404);
-  if (!user.face_verified) {
+  if (!user.face_verified || !user.face_embedding_ref) {
     throw new AppError('Face not registered. Please complete face verification in your profile.', 403);
   }
 
@@ -123,21 +146,38 @@ const verifyFaceForRide = async (userId, ridePassengerId, base64Image) => {
   if (rp.status === 'cancelled') throw new AppError('This ride has been cancelled.', 400);
 
   if (rp.face_verify_attempts >= FACE_VERIFY_MAX_RETRIES) {
+    // Auto-cancel the ride after too many failed attempts
+    await supabase.from('rides')
+      .update({ status: 'cancelled' })
+      .eq('id',
+        (await supabase.from('ride_passengers').select('ride_id').eq('id', ridePassengerId).single())
+          .data?.ride_id
+      );
     throw new AppError('Face verification failed after 5 attempts. Ride has been cancelled.', 403);
   }
 
-  // Day 3: replace with real face comparison here
-  const verified = true; // Always passes in dev
+  if (!base64Image) throw new AppError('Image data is required.', 400);
 
-  if (!verified) {
+  const imageBuffer = Buffer.from(base64Image, 'base64');
+
+  // Compare live selfie against the stored faceId
+  const result = await compareFace(imageBuffer, user.face_embedding_ref);
+
+  if (!result.matched) {
+    // Increment attempt counter
     await supabase
       .from('ride_passengers')
       .update({ face_verify_attempts: rp.face_verify_attempts + 1 })
       .eq('id', ridePassengerId);
-    throw new AppError('Face verification failed. Please try again.', 422);
+
+    const attemptsLeft = FACE_VERIFY_MAX_RETRIES - (rp.face_verify_attempts + 1);
+    throw new AppError(
+      `Face verification failed. ${attemptsLeft > 0 ? `${attemptsLeft} attempt(s) remaining.` : 'No attempts remaining.'}`,
+      422
+    );
   }
 
-  // Mark verified
+  // Success — mark face verified for this ride leg
   await supabase
     .from('ride_passengers')
     .update({
@@ -148,13 +188,48 @@ const verifyFaceForRide = async (userId, ridePassengerId, base64Image) => {
 
   return {
     verified: true,
+    similarity: result.similarity,
     message: 'Identity verified. You can now start your ride.',
+  };
+};
+
+// ─── Get Verification Status ──────────────────────────────────────────────────
+
+const getVerificationStatus = async (userId) => {
+  const { data: user, error } = await supabase
+    .from('users')
+    .select('face_verified, face_consent_given, face_consent_given_at')
+    .eq('id', userId)
+    .single();
+
+  if (error || !user) throw new AppError('User not found.', 404);
+
+  return {
+    faceVerified: user.face_verified,
+    consentGiven: user.face_consent_given,
+    consentGivenAt: user.face_consent_given_at,
   };
 };
 
 // ─── Delete Face Data (DPDP right to erasure) ─────────────────────────────────
 
 const deleteFaceData = async (userId) => {
+  // Get the stored faceId reference before wiping it
+  const { data: user } = await supabase
+    .from('users')
+    .select('face_embedding_ref')
+    .eq('id', userId)
+    .single();
+
+  // Delete from Rekognition collection if a real faceId is stored
+  if (user?.face_embedding_ref && !user.face_embedding_ref.startsWith('mock-face-')) {
+    await deleteFace(user.face_embedding_ref).catch((err) => {
+      // Log but don't block erasure if Rekognition call fails
+      console.error('[Face] Rekognition delete failed:', err.message);
+    });
+  }
+
+  // Wipe all face fields from DB
   const { error } = await supabase
     .from('users')
     .update({
@@ -175,5 +250,6 @@ module.exports = {
   validateFaceForRegistration,
   confirmFaceRegistration,
   verifyFaceForRide,
+  getVerificationStatus,
   deleteFaceData,
 };
