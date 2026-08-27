@@ -58,6 +58,15 @@ const findCompatiblePassengers = async (rideId) => {
   const windowStart = new Date(new Date(anchor.scheduled_at).getTime() - MATCH_WINDOW_MIN * 60000).toISOString();
   const windowEnd = new Date(new Date(anchor.scheduled_at).getTime() + MATCH_WINDOW_MIN * 60000).toISOString();
 
+  // O2: bounding box on anchor pickup — candidates must have their pickup within
+  // MAX_PICKUP_DETOUR_KM of the anchor. Cuts DB rows before JS filtering.
+  const DEG_PER_KM = 1 / 111;
+  const delta = MAX_PICKUP_DETOUR_KM * DEG_PER_KM * Math.SQRT2;
+  const latMin = parseFloat(anchor.pickup_lat) - delta;
+  const latMax = parseFloat(anchor.pickup_lat) + delta;
+  const lngMin = parseFloat(anchor.pickup_lng) - delta;
+  const lngMax = parseFloat(anchor.pickup_lng) + delta;
+
   // Fetch candidate rides (same city, type, time window, shared, pending)
   const { data: candidates } = await supabase
     .from('rides')
@@ -74,7 +83,11 @@ const findCompatiblePassengers = async (rideId) => {
     .lt('ride_passengers.rejection_count', CO_PASSENGER_MAX_REJECTIONS)
     .gte('scheduled_at', windowStart)
     .lte('scheduled_at', windowEnd)
-    .gt('max_passengers', 1);
+    .gt('max_passengers', 1)
+    .gte('pickup_lat', latMin)
+    .lte('pickup_lat', latMax)
+    .gte('pickup_lng', lngMin)
+    .lte('pickup_lng', lngMax);
 
   if (!candidates) return [];
 

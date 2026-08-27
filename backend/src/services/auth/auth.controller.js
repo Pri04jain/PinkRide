@@ -49,4 +49,14 @@ const refreshToken = async (req, res, next) => {
   }
 };
 
-module.exports = { requestOtp, verifyOtpAndLogin, refreshToken };
+const logout = async (req, res, next) => {
+  try {
+    const { refreshToken } = req.body;
+    const result = await authService.logout(refreshToken);
+    return success(res, result, 'Logged out successfully.');
+  } catch (err) {
+    next(err);
+  }
+};
+
+module.exports = { requestOtp, verifyOtpAndLogin, refreshToken, logout };

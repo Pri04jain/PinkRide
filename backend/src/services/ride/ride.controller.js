@@ -16,8 +16,19 @@ const getFareEstimate = async (req, res, next) => {
   try {
     const errs = validationResult(req);
     if (!errs.isEmpty()) return error(res, 'Validation failed', 422, errs.array());
-    const { distanceKm, rideType = 'private' } = req.query;
-    const result = await rideService.getFareEstimate(parseFloat(distanceKm), rideType);
+    const {
+      distanceKm,
+      rideType = 'private',
+      pickupLat, pickupLng, dropLat, dropLng,
+    } = req.query;
+    const result = await rideService.getFareEstimate(
+      parseFloat(distanceKm),
+      rideType,
+      pickupLat ? parseFloat(pickupLat) : null,
+      pickupLng ? parseFloat(pickupLng) : null,
+      dropLat  ? parseFloat(dropLat)  : null,
+      dropLng  ? parseFloat(dropLng)  : null,
+    );
     return success(res, result);
   } catch (err) { next(err); }
 };

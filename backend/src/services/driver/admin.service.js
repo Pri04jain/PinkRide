@@ -1,9 +1,12 @@
 const { supabase } = require('../../shared/db/client');
 const { AppError } = require('../../shared/middleware/errorHandler');
+const { notify } = require('../notification/fcm.service');
 
 // ─── Approval Queue ───────────────────────────────────────────────────────────
 
 const getDriverQueue = async ({ status = 'under_review', page = 1, limit = 20 } = {}) => {
+  // O4: single join query — was N+1 (1 drivers query + 1 users query per driver).
+  // Now always 1 roundtrip regardless of page size.
   let query = supabase
     .from('drivers')
     .select(`
@@ -13,7 +16,8 @@ const getDriverQueue = async ({ status = 'under_review', page = 1, limit = 20 } 
       vehicle_color, vehicle_year,
       approval_status, rejection_reason,
       license_doc_url, vehicle_rc_url, vehicle_insurance_url,
-      created_at, updated_at
+      created_at, updated_at,
+      users!inner(full_name, phone, face_verified, gender)
     `, { count: 'exact' })
     .order('created_at', { ascending: true })
     .range((page - 1) * limit, page * limit - 1);
@@ -25,18 +29,8 @@ const getDriverQueue = async ({ status = 'under_review', page = 1, limit = 20 } 
   const { data, error, count } = await query;
   if (error) throw new AppError('Failed to fetch driver queue.', 500);
 
-  // Fetch user info separately for each driver (avoids Supabase join ambiguity)
-  const drivers = await Promise.all((data || []).map(async (driver) => {
-    const { data: user } = await supabase
-      .from('users')
-      .select('full_name, phone, face_verified, gender')
-      .eq('id', driver.user_id)
-      .single();
-    return { ...driver, users: user || {} };
-  }));
-
   return {
-    drivers,
+    drivers: data || [],
     pagination: {
       page, limit,
       total: count || 0,
@@ -84,6 +78,11 @@ const approveDriver = async (driverId, adminUserId) => {
 
   if (error) throw new AppError('Failed to approve driver.', 500);
 
+  // Notify the driver (fire-and-forget)
+  notify.driverApproved(driver.user_id).catch((err) =>
+    console.error('[Admin] driverApproved push failed:', err.message)
+  );
+
   console.log(`[Admin] Driver ${driverId} approved by ${adminUserId}`);
   return { approved: true, driverId };
 };
@@ -106,6 +105,11 @@ const rejectDriver = async (driverId, adminUserId, reason) => {
     .eq('id', driverId);
 
   if (error) throw new AppError('Failed to reject driver.', 500);
+
+  // Notify the driver (fire-and-forget)
+  notify.driverRejected(driver.user_id, reason.trim()).catch((err) =>
+    console.error('[Admin] driverRejected push failed:', err.message)
+  );
 
   console.log(`[Admin] Driver ${driverId} rejected by ${adminUserId}: ${reason}`);
   return { rejected: true, driverId, reason };

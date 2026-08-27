@@ -172,6 +172,23 @@ const topUpWallet = async (userId, amount, referenceId = null) => {
 };
 
 /**
+ * Record face-scan consent (DPDP Act requirement)
+ * Must be called before any face capture/verification endpoint.
+ */
+const recordFaceConsent = async (userId) => {
+  const { error } = await supabase
+    .from('users')
+    .update({
+      face_consent_given: true,
+      face_consent_given_at: new Date().toISOString(),
+    })
+    .eq('id', userId);
+
+  if (error) throw new AppError('Failed to record consent.', 500);
+  return { consentRecorded: true };
+};
+
+/**
  * Soft-delete account (DPDP Act — right to erasure)
  */
 const deleteAccount = async (userId) => {
@@ -197,5 +214,6 @@ module.exports = {
   getEmergencyContacts,
   deleteEmergencyContact,
   topUpWallet,
+  recordFaceConsent,
   deleteAccount,
 };

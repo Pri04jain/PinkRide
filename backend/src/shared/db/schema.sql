@@ -33,6 +33,19 @@ CREATE TYPE fine_status AS ENUM ('pending', 'collected', 'waived');
 CREATE TYPE deviation_status AS ENUM ('detected', 'passenger_acknowledged', 'contacts_alerted', 'resolved');
 
 -- ============================================================
+-- AUTO-UPDATE updated_at TRIGGER FUNCTION
+-- Defined here — BEFORE any table that uses it.
+-- ============================================================
+
+CREATE OR REPLACE FUNCTION update_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ============================================================
 -- USERS
 -- Core table — both passengers and drivers are users
 -- ============================================================
@@ -76,12 +89,6 @@ CREATE INDEX idx_users_phone ON users(phone);
 CREATE INDEX idx_users_role ON users(role);
 CREATE INDEX idx_users_city ON users(city);
 
--- ============================================================
--- DRIVERS
--- Extends users (user must have role='driver')
--- Flat lat/lng columns instead of PostGIS geometry —
--- easier to query from JS, Supabase handles the rest
--- ============================================================
 
 CREATE TABLE drivers (
   id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -175,6 +182,8 @@ CREATE TABLE rides (
   -- Payment
   payment_method    payment_method,
   payment_status    payment_status NOT NULL DEFAULT 'pending',
+  payment_order_id  TEXT,                    -- Razorpay orderId — stored on first order creation,
+                                             -- returned on retry to prevent duplicate orders
 
   -- OTP (generated after face verification passes)
   otp               VARCHAR(6),
@@ -353,7 +362,7 @@ CREATE INDEX idx_device_tokens_user ON device_tokens(user_id) WHERE is_active = 
 -- Auto-update updated_at on token refresh
 CREATE TRIGGER update_device_tokens_updated_at
   BEFORE UPDATE ON device_tokens
-  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 CREATE INDEX idx_otp_logs_phone ON otp_logs(phone);
 
@@ -375,18 +384,92 @@ CREATE TABLE wallet_transactions (
 CREATE INDEX idx_wallet_user ON wallet_transactions(user_id);
 
 -- ============================================================
--- AUTO-UPDATE updated_at TRIGGER
--- Supabase supports triggers — this keeps updated_at current
--- automatically on every UPDATE without needing app-level code
+-- LOCATION HISTORY
+-- GPS breadcrumb trail — one row per driver location update
+-- during an active ride (status = in_progress).
+-- Used for post-ride dispute resolution and route replay.
+-- Only written while a ride is in_progress to keep volume manageable.
 -- ============================================================
 
-CREATE OR REPLACE FUNCTION update_updated_at()
-RETURNS TRIGGER AS $$
+CREATE TABLE location_history (
+  id          BIGSERIAL PRIMARY KEY,          -- bigserial for high-volume inserts
+  ride_id     UUID NOT NULL REFERENCES rides(id) ON DELETE CASCADE,
+  driver_id   UUID NOT NULL REFERENCES drivers(id) ON DELETE CASCADE,
+  lat         NUMERIC(10,7) NOT NULL,
+  lng         NUMERIC(10,7) NOT NULL,
+  heading     NUMERIC(5,2),                   -- degrees 0-360
+  speed_kmh   NUMERIC(5,2),
+  recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Partial index — queries always filter by ride_id
+CREATE INDEX idx_location_history_ride ON location_history(ride_id, recorded_at DESC);
+
+-- ============================================================
+-- PAYMENT ORDERS
+-- Stores Razorpay order IDs for wallet top-ups.
+-- Prevents duplicate orders when the client retries the order
+-- creation endpoint (e.g. after a network timeout).
+-- One pending order per user at a time — resolved on verify.
+-- ============================================================
+
+CREATE TABLE payment_orders (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  order_id    TEXT NOT NULL UNIQUE,          -- Razorpay orderId (order_xxx...)
+  amount      NUMERIC(8,2) NOT NULL,
+  purpose     VARCHAR(30) NOT NULL DEFAULT 'wallet_topup',
+  status      VARCHAR(20) NOT NULL DEFAULT 'pending',  -- pending | completed | failed
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at  TIMESTAMPTZ NOT NULL           -- orders expire after 30 min if uncompleted
+);
+
+CREATE INDEX idx_payment_orders_user ON payment_orders(user_id);
+CREATE INDEX idx_payment_orders_order_id ON payment_orders(order_id);
+
+-- ============================================================
+-- REVOKED TOKENS
+-- Stores jti (JWT ID) of invalidated refresh tokens.
+-- Checked on every token refresh and on every authenticated request.
+-- Rows are safe to prune after expires_at passes.
+-- ============================================================
+
+CREATE TABLE revoked_tokens (
+  jti         TEXT PRIMARY KEY,
+  user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  revoked_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at  TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX idx_revoked_tokens_user ON revoked_tokens(user_id);
+CREATE INDEX idx_revoked_tokens_expires ON revoked_tokens(expires_at);
+
+-- ============================================================
+-- UTILITY FUNCTIONS
+-- Called from the Node.js service layer via supabase.rpc().
+-- ============================================================
+
+-- Atomically increment total_rides for multiple users at once.
+-- Avoids N+1 queries and race conditions from JS read-modify-write.
+CREATE OR REPLACE FUNCTION increment_user_total_rides(p_user_ids UUID[])
+RETURNS void AS $$
 BEGIN
-  NEW.updated_at = NOW();
-  RETURN NEW;
+  UPDATE users SET total_rides = total_rides + 1 WHERE id = ANY(p_user_ids);
 END;
 $$ LANGUAGE plpgsql;
+
+-- Atomically increment total_trips for a single driver.
+CREATE OR REPLACE FUNCTION increment_driver_total_trips(p_driver_id UUID)
+RETURNS void AS $$
+BEGIN
+  UPDATE drivers SET total_trips = total_trips + 1 WHERE id = p_driver_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ============================================================
+-- TRIGGER REGISTRATIONS
+-- Wire update_updated_at() to all tables that have updated_at.
+-- ============================================================
 
 CREATE TRIGGER trg_users_updated_at
   BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_updated_at();
@@ -419,6 +502,9 @@ ALTER TABLE fines ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ratings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE otp_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE wallet_transactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE revoked_tokens ENABLE ROW LEVEL SECURITY;
+ALTER TABLE payment_orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE location_history ENABLE ROW LEVEL SECURITY;
 
 -- Allow full access via service role (used by backend)
 -- These are the default Supabase service role grants — no extra setup needed.

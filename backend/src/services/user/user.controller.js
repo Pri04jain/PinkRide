@@ -1,5 +1,6 @@
 const { validationResult } = require('express-validator');
 const userService = require('./user.service');
+const paymentService = require('../payment/payment.service');
 const { success, created, error } = require('../../shared/utils/response');
 
 const completeRegistration = async (req, res, next) => {
@@ -60,13 +61,22 @@ const deleteEmergencyContact = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-const topUpWallet = async (req, res, next) => {
+const createWalletTopupOrder = async (req, res, next) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return error(res, 'Validation failed', 422, errors.array());
+    const result = await paymentService.createWalletTopupOrder(req.user.id, req.body.amount);
+    return success(res, result, 'Top-up order created. Complete payment to credit your wallet.');
+  } catch (err) { next(err); }
+};
 
-    const result = await userService.topUpWallet(req.user.id, req.body.amount, req.body.referenceId);
-    return success(res, result, 'Wallet topped up successfully');
+const verifyWalletTopup = async (req, res, next) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return error(res, 'Validation failed', 422, errors.array());
+    // amount is NOT passed — service reads it from payment_orders for security
+    const result = await paymentService.verifyWalletTopup(req.user.id, req.body);
+    return success(res, result, 'Wallet topped up successfully.');
   } catch (err) { next(err); }
 };
 
@@ -80,5 +90,5 @@ const deleteAccount = async (req, res, next) => {
 module.exports = {
   completeRegistration, recordFaceConsent, getProfile, updateProfile,
   addEmergencyContact, getEmergencyContacts, deleteEmergencyContact,
-  topUpWallet, deleteAccount,
+  createWalletTopupOrder, verifyWalletTopup, deleteAccount,
 };

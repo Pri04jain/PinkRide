@@ -95,4 +95,19 @@ const safetyCheckIn = async (passengerId, rideId) => {
   return { checkedIn: true };
 };
 
-module.exports = { triggerSOS, respondToDeviation, safetyCheckIn };
+/**
+ * Get emergency contacts for a user — exposed via the safety routes
+ * so the safety controller has a single import for all safety-related ops.
+ */
+const getEmergencyContacts = async (userId) => {
+  const { data, error } = await supabase
+    .from('emergency_contacts')
+    .select('id, name, phone, relation, is_primary, created_at')
+    .eq('user_id', userId)
+    .order('is_primary', { ascending: false });
+
+  if (error) throw new AppError('Failed to fetch emergency contacts.', 500);
+  return data || [];
+};
+
+module.exports = { triggerSOS, respondToDeviation, safetyCheckIn, getEmergencyContacts };

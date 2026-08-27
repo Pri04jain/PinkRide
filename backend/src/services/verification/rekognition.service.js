@@ -164,13 +164,19 @@ const deleteFace = async (faceId) => {
 };
 
 // ─── Dev Mock Mode ────────────────────────────────────────────────────────────
+//
+// Mock mode is controlled by the explicit FACE_VERIFICATION_MOCK=true env flag.
+//
+// Previously this relied on NODE_ENV !== 'production', which meant a production
+// server started without NODE_ENV=production set would silently bypass all
+// biometric checks. Now mock mode only activates when explicitly opted in,
+// making the production-safe default not require any special configuration.
+//
+// Also: isMockMode() is now evaluated lazily (inside each exported wrapper)
+// instead of once at module load time, so a misconfigured process can't get
+// permanently locked into mock mode for its lifetime.
 
-const isMockMode = () => {
-  return (
-    process.env.NODE_ENV !== 'production' &&
-    (!process.env.AWS_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY_ID === 'your_aws_access_key')
-  );
-};
+const isMockMode = () => process.env.FACE_VERIFICATION_MOCK === 'true';
 
 const mockDetect = async () => ({ faceDetected: true, livenessScore: 99.5, details: { confidence: 99.5 } });
 const mockIndex = async (buf, userId) => ({ faceId: 'mock-face-' + userId.substring(0, 8), confidence: 99.2 });
@@ -179,9 +185,9 @@ const mockDelete = async () => ({ deleted: true });
 
 module.exports = {
   ensureCollection,
-  detectAndValidateFace: isMockMode() ? mockDetect : detectAndValidateFace,
-  indexFace: isMockMode() ? mockIndex : indexFace,
-  compareFace: isMockMode() ? mockCompare : compareFace,
-  deleteFace: isMockMode() ? mockDelete : deleteFace,
+  detectAndValidateFace: (buf) => isMockMode() ? mockDetect(buf) : detectAndValidateFace(buf),
+  indexFace: (buf, userId) => isMockMode() ? mockIndex(buf, userId) : indexFace(buf, userId),
+  compareFace: (buf, faceId) => isMockMode() ? mockCompare(buf, faceId) : compareFace(buf, faceId),
+  deleteFace: (faceId) => isMockMode() ? mockDelete(faceId) : deleteFace(faceId),
   MATCH_THRESHOLD,
 };

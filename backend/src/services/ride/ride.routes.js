@@ -7,9 +7,14 @@ const router = express.Router();
 router.use(authenticate);
 
 // GET  /api/v1/rides/fare-estimate?distanceKm=12&rideType=shared
+// Also accepts pickupLat/pickupLng/dropLat/dropLng for server-side distance calculation
 router.get('/fare-estimate', [
-  qv('distanceKm').isFloat({ min: 0.1 }).withMessage('distanceKm must be a positive number'),
+  qv('distanceKm').optional().isFloat({ min: 0.1 }).withMessage('distanceKm must be a positive number'),
   qv('rideType').optional().isIn(['private', 'shared', 'women_only_shared']),
+  qv('pickupLat').optional().isFloat({ min: -90, max: 90 }),
+  qv('pickupLng').optional().isFloat({ min: -180, max: 180 }),
+  qv('dropLat').optional().isFloat({ min: -90, max: 90 }),
+  qv('dropLng').optional().isFloat({ min: -180, max: 180 }),
 ], controller.getFareEstimate);
 
 // GET  /api/v1/rides/active — current active ride for the user
@@ -25,8 +30,8 @@ router.post('/book', requireRole('passenger'), [
   body('dropLng').isFloat({ min: -180, max: 180 }).withMessage('Invalid drop longitude'),
   body('dropAddress').trim().notEmpty().withMessage('Drop address required'),
   body('scheduledAt').isISO8601().withMessage('scheduledAt must be a valid ISO date'),
-  body('distanceKm').isFloat({ min: 0.1 }).withMessage('distanceKm required'),
-  body('durationMin').optional().isInt({ min: 1 }),
+  body('distanceKm').optional().isFloat({ min: 0.1 }),  // ignored — server calculates from coordinates
+  body('durationMin').optional().isInt({ min: 1 }),     // ignored — server calculates from coordinates
   body('paymentMethod').optional().isIn(['cash', 'upi']),
 ], controller.bookRide);
 

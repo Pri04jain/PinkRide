@@ -8,7 +8,17 @@ const AUTO_ALERT_SECONDS = parseInt(process.env.ROUTE_DEVIATION_AUTO_ALERT_SECON
 
 // In-memory cache for latest driver location per ride
 // Key: rideId, Value: { lat, lng, ts }
+// F9: entries are evicted via clearRideCache() when ride ends,
+// and a 30-min sweep runs periodically as a safety net.
 const locationCache = new Map();
+
+// Periodic sweep — evict entries older than 30 minutes
+setInterval(() => {
+  const cutoff = Date.now() - 30 * 60 * 1000;
+  for (const [rideId, entry] of locationCache.entries()) {
+    if (entry.ts < cutoff) locationCache.delete(rideId);
+  }
+}, 10 * 60 * 1000); // run every 10 minutes
 
 // Key builders
 const activeDeviationKey = (rideId) => `active_deviation:${rideId}`;
@@ -46,14 +56,29 @@ const processLocationUpdate = async (driverUserId, rideId, lat, lng) => {
   // 3. Check if ride is in progress
   const { data: ride } = await supabase
     .from('rides')
-    .select('id, status, pickup_lat, pickup_lng, drop_lat, drop_lng')
+    .select('id, status, driver_id, pickup_lat, pickup_lng, drop_lat, drop_lng')
     .eq('id', rideId)
     .eq('status', 'in_progress')
     .single();
 
-  if (!ride) return; // not in progress, skip deviation check
+  if (!ride) return; // not in progress, skip breadcrumb + deviation check
 
-  // 4. Calculate deviation using Haversine
+  // 4. Write GPS breadcrumb to location_history (non-blocking)
+  //    Only written while ride is in_progress — keeps volume manageable.
+  supabase
+    .from('location_history')
+    .insert({
+      ride_id: rideId,
+      driver_id: ride.driver_id,
+      lat,
+      lng,
+      recorded_at: new Date().toISOString(),
+    })
+    .then(({ error }) => {
+      if (error) console.error('[Tracking] Breadcrumb insert error:', error.message);
+    });
+
+  // 5. Calculate deviation using Haversine
   const deviationMeters = _pointToLineDistance(
     lat, lng,
     ride.pickup_lat, ride.pickup_lng,
@@ -66,22 +91,62 @@ const processLocationUpdate = async (driverUserId, rideId, lat, lng) => {
 };
 
 /**
- * Haversine distance from a point to a line segment (pickup → drop).
+ * F8 — True perpendicular distance from point P to line segment A→B.
  * Returns distance in meters.
+ *
+ * Algorithm: project P onto the infinite line through A and B using
+ * dot-product in ECEF (Earth-Centered Earth-Fixed) Cartesian space,
+ * clamp the projection to the segment [A,B], then compute the
+ * Haversine distance from P to the clamped projection point.
+ *
+ * Why this matters:
+ * The old version computed min(dist(P,A), dist(P,B), dist(P,midpoint)).
+ * For a driver at the midpoint of a long route, ALL three samples are large
+ * even when the driver is perfectly on-route → false deviation alert every time.
+ * This version correctly returns near-zero for any point along the route.
  */
 const _pointToLineDistance = (pLat, pLng, aLat, aLng, bLat, bLng) => {
-  // Project point onto the line, then compute perpendicular distance
   const toRad = (d) => (d * Math.PI) / 180;
-  const R = 6371000; // Earth radius in meters
 
-  // Use the minimum of distance to each endpoint + midpoint as a simple approximation
-  const distA = _haversine(pLat, pLng, aLat, aLng);
-  const distB = _haversine(pLat, pLng, bLat, bLng);
-  const midLat = (aLat + bLat) / 2;
-  const midLng = (aLng + bLng) / 2;
-  const distMid = _haversine(pLat, pLng, midLat, midLng);
+  // Convert lat/lng to unit ECEF vectors
+  const toVec = (lat, lng) => {
+    const φ = toRad(lat);
+    const λ = toRad(lng);
+    return [Math.cos(φ) * Math.cos(λ), Math.cos(φ) * Math.sin(λ), Math.sin(φ)];
+  };
 
-  return Math.min(distA, distB, distMid);
+  const dot = (u, v) => u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+  const sub = (u, v) => [u[0] - v[0], u[1] - v[1], u[2] - v[2]];
+  const add = (u, v) => [u[0] + v[0], u[1] + v[1], u[2] + v[2]];
+  const scale = (u, s) => [u[0] * s, u[1] * s, u[2] * s];
+  const norm = (u) => Math.sqrt(dot(u, u));
+
+  const P = toVec(pLat, pLng);
+  const A = toVec(aLat, aLng);
+  const B = toVec(bLat, bLng);
+
+  const AB = sub(B, A);
+  const AP = sub(P, A);
+
+  const lenSqAB = dot(AB, AB);
+
+  // Degenerate segment (A === B) — fall back to point distance
+  if (lenSqAB < 1e-12) return _haversine(pLat, pLng, aLat, aLng);
+
+  // t is the unclamped projection parameter [0,1] along A→B
+  const t = Math.max(0, Math.min(1, dot(AP, AB) / lenSqAB));
+
+  // Closest point on segment in Cartesian space (may not be on the unit sphere)
+  const closest = add(A, scale(AB, t));
+
+  // Re-normalise back onto the unit sphere
+  const len = norm(closest);
+  const Q = scale(closest, 1 / len);
+
+  // Angular distance between P and Q → metres
+  const cosAngle = Math.min(1, Math.max(-1, dot(P, Q)));
+  const R = 6371000; // Earth radius metres
+  return R * Math.acos(cosAngle);
 };
 
 const _haversine = (lat1, lng1, lat2, lng2) => {
@@ -261,9 +326,35 @@ const getRideDeviations = async (rideId) => {
   return data || [];
 };
 
+/**
+ * Get GPS breadcrumb trail for a completed ride.
+ * Returns all recorded locations in chronological order for route replay.
+ */
+const getRideLocationHistory = async (rideId) => {
+  const { data, error } = await supabase
+    .from('location_history')
+    .select('id, lat, lng, heading, speed_kmh, recorded_at')
+    .eq('ride_id', rideId)
+    .order('recorded_at', { ascending: true });
+
+  if (error) throw new AppError('Failed to fetch location history.', 500);
+  return data || [];
+};
+
+/**
+ * F9 — Evict a ride's location cache entry when the ride ends.
+ * Called from completeRide() and cancelRide() in ride/otp.service.js
+ * and ride/ride.service.js respectively.
+ */
+const clearRideCache = (rideId) => {
+  locationCache.delete(rideId);
+};
+
 module.exports = {
   processLocationUpdate,
   acknowledgeDeviation,
   getDriverLocation,
   getRideDeviations,
+  getRideLocationHistory,
+  clearRideCache,
 };

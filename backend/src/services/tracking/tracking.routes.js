@@ -16,6 +16,11 @@ router.get('/:rideId/deviations', [
   param('rideId').isUUID(),
 ], controller.getRideDeviations);
 
+// GET /api/v1/tracking/:rideId/history — full GPS breadcrumb trail for a ride
+router.get('/:rideId/history', [
+  param('rideId').isUUID(),
+], controller.getRideLocationHistory);
+
 // POST /api/v1/tracking/deviations/:deviationId/acknowledge
 router.post('/deviations/:deviationId/acknowledge', [
   param('deviationId').isUUID(),

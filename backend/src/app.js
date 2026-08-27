@@ -23,9 +23,25 @@ const app = express();
 
 // Security middleware
 app.use(helmet());
+
+// CORS — reads ALLOWED_ORIGINS from env (comma-separated list of allowed origins).
+// Falls back to '*' only in development so local tooling still works without config.
+// In production, ALLOWED_ORIGINS must be set explicitly — '*' is never used in prod.
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim())
+  : null;
+
 app.use(cors({
-  origin: '*',
-  credentials: false,
+  origin: allowedOrigins
+    ? (origin, callback) => {
+        // Allow requests with no origin (server-to-server, curl, Postman)
+        if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+        callback(new Error(`CORS: origin '${origin}' not allowed`));
+      }
+    : process.env.NODE_ENV === 'production'
+      ? false   // no ALLOWED_ORIGINS in prod = block all cross-origin requests
+      : '*',    // dev fallback
+  credentials: true,
 }));
 
 // Rate limiting - global
@@ -53,6 +69,14 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
   });
 });
+
+// Serve locally-uploaded files in development.
+// In production, files are stored in Supabase Storage and served via signed URLs —
+// this mount is a no-op when SUPABASE_STORAGE_BUCKET is configured.
+if (!process.env.SUPABASE_STORAGE_BUCKET) {
+  const path = require('path');
+  app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+}
 
 // API routes
 app.use('/api/v1/auth', authRoutes);

@@ -2,6 +2,7 @@ const { supabase } = require('../../shared/db/client');
 const { otpStore } = require('../../shared/cache/otpStore');
 const { AppError } = require('../../shared/middleware/errorHandler');
 const { calculatePrivateFare, calculateSharedFare, estimateFare } = require('./fare.calculator');
+const { getDrivingDistance } = require('./maps.service');
 const {
   findCompatiblePassengers,
   estimateDetourMinutes,
@@ -9,6 +10,8 @@ const {
   deletePendingMatch,
   MATCH_WINDOW_MIN,
 } = require('./matching.engine');
+const { notify } = require('../notification/fcm.service');
+const { clearRideCache } = require('../tracking/tracking.service');
 
 const CANCELLATION_FEE   = parseFloat(process.env.CANCELLATION_FEE_INR) || 50;
 const DRIVER_FINE        = parseFloat(process.env.DRIVER_CANCELLATION_FINE_INR) || 150;
@@ -23,8 +26,6 @@ const bookRide = async (passengerId, bookingData) => {
     dropLat, dropLng, dropAddress,
     scheduledAt,
     paymentMethod = 'cash',
-    distanceKm,
-    durationMin,
   } = bookingData;
 
   const { data: user, error: userError } = await supabase
@@ -43,6 +44,16 @@ const bookRide = async (passengerId, bookingData) => {
       `Shared rides require a minimum wallet balance of ₹${CANCELLATION_FEE}. Please top up your wallet.`,
       400
     );
+  }
+
+  // Calculate driving distance + duration server-side — client value is ignored.
+  // Falls back to Haversine if Google Maps API key is not configured.
+  const { distanceKm, durationMin, source: distanceSource } = await getDrivingDistance(
+    pickupLat, pickupLng, dropLat, dropLng
+  );
+
+  if (distanceKm < 0.1) {
+    throw new AppError('Pickup and drop locations are too close. Minimum distance is 0.1 km.', 400);
   }
 
   const fare = calculatePrivateFare(distanceKm, durationMin);
@@ -95,6 +106,12 @@ const bookRide = async (passengerId, bookingData) => {
     throw new AppError('Failed to create ride booking. Please try again.', 500);
   }
 
+  // Notify all online+approved drivers in the same city about the new ride request
+  // Fire-and-forget — a failed push must never fail the booking response
+  _notifyNearbyDrivers(user.city, pickupAddress, fare.totalFare).catch((err) =>
+    console.error('[Ride] Driver notification error:', err.message)
+  );
+
   return {
     rideId: ride.id,
     rideType,
@@ -108,6 +125,8 @@ const bookRide = async (passengerId, bookingData) => {
       totalFare: fare.totalFare,
     },
     distanceKm,
+    durationMin,
+    distanceSource,
     message: isShared
       ? `Ride booked. Looking for a co-passenger within ${MATCH_WINDOW_MIN} minutes.`
       : 'Private ride booked. Looking for a driver.',
@@ -360,6 +379,9 @@ const cancelRide = async (userId, rideId, reason, cancelledBy = 'passenger') => 
     }
   }
 
+  // F9: evict location cache — ride is over
+  clearRideCache(rideId);
+
   return {
     cancelled: true,
     rideId,
@@ -423,8 +445,40 @@ const getDriverActiveRide = async (driverUserId) => {
 };
 
 // ─── Fare Estimate ────────────────────────────────────────────────────────────
+// If pickup/drop coordinates are provided, calculate real driving distance.
+// Falls back to the client-supplied distanceKm if coordinates are missing.
 
-const getFareEstimate = (distanceKm, rideType) => estimateFare(distanceKm, rideType);
+const getFareEstimate = async (distanceKm, rideType, pickupLat, pickupLng, dropLat, dropLng) => {
+  let resolvedDistanceKm = distanceKm;
+
+  if (pickupLat && pickupLng && dropLat && dropLng) {
+    const result = await getDrivingDistance(pickupLat, pickupLng, dropLat, dropLng);
+    resolvedDistanceKm = result.distanceKm;
+  }
+
+  return estimateFare(resolvedDistanceKm, rideType);
+};
+
+// ─── Notify Nearby Drivers ────────────────────────────────────────────────────
+// Fetches all online, approved drivers in the given city and sends a push.
+// Called fire-and-forget from bookRide — never throws to the caller.
+
+const _notifyNearbyDrivers = async (city, pickupAddress, fareAmount) => {
+  const { data: drivers } = await supabase
+    .from('drivers')
+    .select('user_id, users!inner(city)')
+    .eq('approval_status', 'approved')
+    .eq('is_available', true)
+    .eq('users.city', city);
+
+  if (!drivers?.length) return;
+
+  await Promise.allSettled(
+    drivers.map((d) =>
+      notify.newRideRequest(d.user_id, pickupAddress, fareAmount)
+    )
+  );
+};
 
 module.exports = {
   bookRide,

@@ -42,11 +42,19 @@ router.delete('/emergency-contacts/:contactId', [
   param('contactId').isUUID().withMessage('Invalid contact ID'),
 ], controller.deleteEmergencyContact);
 
-// Wallet
-router.post('/wallet/topup', [
-  body('amount').isFloat({ min: 50 }).withMessage('Minimum top-up is ₹50'),
-  body('referenceId').optional().isString(),
-], controller.topUpWallet);
+// Wallet — two-step Razorpay-verified top-up
+// Step 1: POST /api/v1/users/wallet/topup/order  → get Razorpay order
+router.post('/wallet/topup/order', [
+  body('amount').isFloat({ min: 100 }).withMessage('Minimum top-up is ₹100'),
+], controller.createWalletTopupOrder);
+
+// Step 2: POST /api/v1/users/wallet/topup/verify → submit payment proof, wallet credited
+router.post('/wallet/topup/verify', [
+  body('amount').isFloat({ min: 100 }).withMessage('Amount is required'),
+  body('razorpay_order_id').notEmpty().withMessage('razorpay_order_id is required'),
+  body('razorpay_payment_id').notEmpty().withMessage('razorpay_payment_id is required'),
+  body('razorpay_signature').notEmpty().withMessage('razorpay_signature is required'),
+], controller.verifyWalletTopup);
 
 // DELETE /api/v1/users/account — DPDP right to erasure
 router.delete('/account', controller.deleteAccount);

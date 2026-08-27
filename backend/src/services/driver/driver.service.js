@@ -2,6 +2,7 @@ const { supabase } = require('../../shared/db/client');
 const { AppError } = require('../../shared/middleware/errorHandler');
 const { emitToRide } = require('../../shared/socket/socket.server');
 const { notify } = require('../notification/fcm.service');
+const { saveFile } = require('../../shared/middleware/upload');
 
 // Haversine distance in km (shared with matching engine — keeps driver service self-contained)
 const haversineKm = (lat1, lng1, lat2, lng2) => {
@@ -95,7 +96,7 @@ const registerDriver = async (userId, driverData) => {
 
 // ─── Upload Documents ─────────────────────────────────────────────────────────
 
-const uploadDocument = async (userId, docType, fileUrl) => {
+const uploadDocument = async (userId, docType, fileBuffer, originalName) => {
   const { data: driver, error } = await supabase
     .from('drivers')
     .select('id, approval_status')
@@ -116,6 +117,9 @@ const uploadDocument = async (userId, docType, fileUrl) => {
   const column = columnMap[docType];
   if (!column) throw new AppError('Invalid document type. Use: license, rc, insurance.', 400);
 
+  // Save the file buffer to disk (dev) — returns a path like /uploads/documents/filename.pdf
+  const fileUrl = await saveFile(fileBuffer, originalName, 'documents');
+
   await supabase
     .from('drivers')
     .update({ [column]: fileUrl })
@@ -124,13 +128,13 @@ const uploadDocument = async (userId, docType, fileUrl) => {
   // Check if all required docs uploaded — auto move to under_review
   await _checkAndAdvanceStatus(driver.id);
 
-  return { uploaded: true, docType };
+  return { uploaded: true, docType, fileUrl };
 };
 
 const _checkAndAdvanceStatus = async (driverId) => {
   const { data: driver } = await supabase
     .from('drivers')
-    .select('license_doc_url, vehicle_rc_url, approval_status')
+    .select('license_doc_url, vehicle_rc_url, approval_status, user_id')
     .eq('id', driverId)
     .single();
 
@@ -143,6 +147,34 @@ const _checkAndAdvanceStatus = async (driverId) => {
       .from('drivers')
       .update({ approval_status: 'under_review' })
       .eq('id', driverId);
+
+    // Fetch driver's name for the admin notification
+    const { data: driverUser } = await supabase
+      .from('users')
+      .select('full_name')
+      .eq('id', driver.user_id)
+      .single();
+
+    const driverName = driverUser?.full_name || 'A new driver';
+
+    // Notify the driver that their application is in review (fire-and-forget)
+    notify.applicationUnderReview(driver.user_id).catch((err) =>
+      console.error('[Driver] applicationUnderReview push failed:', err.message)
+    );
+
+    // Notify all active admin users (fire-and-forget — a push failure must not block upload)
+    supabase
+      .from('users')
+      .select('id')
+      .eq('role', 'admin')
+      .eq('is_active', true)
+      .then(({ data: admins }) => {
+        if (!admins?.length) return;
+        Promise.allSettled(
+          admins.map((admin) => notify.newDriverApplication(admin.id, driverName))
+        );
+      })
+      .catch((err) => console.error('[Driver] Admin notification error:', err.message));
   }
 };
 
@@ -242,9 +274,16 @@ const getNearbyRideRequests = async (driverUserId) => {
 
   const driverCity = driverUser?.city || 'Jaipur';
 
-  // Fetch all open rides in the same city — filter by distance in JS (Haversine)
-  // We pull a modest window (rides created in last 2 hours) to keep result set small
+  // O1: bounding box pre-filter — Postgres discards rows outside a lat/lng square
+  // before they reach Node.js. Haversine then does precise circular filtering on
+  // the small result set. At 5km radius, 1° lat ≈ 111km so delta ≈ 0.045°.
   const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+  const DEG_PER_KM = 1 / 111;
+  const delta = NEARBY_RADIUS_KM * DEG_PER_KM * Math.SQRT2; // expand slightly for square→circle
+  const latMin = driver.current_lat - delta;
+  const latMax = driver.current_lat + delta;
+  const lngMin = driver.current_lng - delta;
+  const lngMax = driver.current_lng + delta;
 
   const { data: rides, error: ridesError } = await supabase
     .from('rides')
@@ -259,6 +298,10 @@ const getNearbyRideRequests = async (driverUserId) => {
     .is('driver_id', null)
     .eq('city', driverCity)
     .gte('created_at', twoHoursAgo)
+    .gte('pickup_lat', latMin)
+    .lte('pickup_lat', latMax)
+    .gte('pickup_lng', lngMin)
+    .lte('pickup_lng', lngMax)
     .order('scheduled_at', { ascending: true });
 
   if (ridesError) throw new AppError('Failed to fetch ride requests.', 500);

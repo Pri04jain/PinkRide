@@ -1,7 +1,7 @@
 const { validationResult } = require('express-validator');
 const verificationService = require('./verification.service');
 const { success, error } = require('../../shared/utils/response');
-const { query } = require('../../shared/db/client');
+const { supabase } = require('../../shared/db/client');
 
 const validateForRegistration = async (req, res, next) => {
   try {
@@ -41,19 +41,22 @@ const deleteFaceData = async (req, res, next) => {
 
 const getVerificationStatus = async (req, res, next) => {
   try {
-    const result = await query(
-      'SELECT face_verified, face_consent_given, face_consent_given_at FROM users WHERE id = $1',
-      [req.user.id]
-    );
-    if (!result.rows.length) return error(res, 'User not found', 404);
-    const row = result.rows[0];
+    const { data: user, error: dbError } = await supabase
+      .from('users')
+      .select('face_verified, face_consent_given, face_consent_given_at')
+      .eq('id', req.user.id)
+      .single();
+
+    if (dbError || !user) return error(res, 'User not found', 404);
+
     let status = 'verified';
-    if (!row.face_consent_given) status = 'consent_required';
-    else if (!row.face_verified) status = 'verification_required';
+    if (!user.face_consent_given) status = 'consent_required';
+    else if (!user.face_verified) status = 'verification_required';
+
     return success(res, {
-      faceVerified: row.face_verified,
-      consentGiven: row.face_consent_given,
-      consentGivenAt: row.face_consent_given_at,
+      faceVerified: user.face_verified,
+      consentGiven: user.face_consent_given,
+      consentGivenAt: user.face_consent_given_at,
       status,
     });
   } catch (err) { next(err); }

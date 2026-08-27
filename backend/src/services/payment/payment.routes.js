@@ -13,6 +13,12 @@ router.get('/wallet', controller.getWallet);
 // GET /api/v1/payments/fines
 router.get('/fines', controller.getPendingFines);
 
+// POST /api/v1/payments/fines/:fineId/collect
+// Deducts the fine amount from the user's wallet
+router.post('/fines/:fineId/collect', [
+  param('fineId').isUUID().withMessage('fineId must be a valid UUID'),
+], controller.collectFine);
+
 // ─── Ride Payments ────────────────────────────────────────────────────────────
 // POST /api/v1/payments/rides/:rideId/upi/order
 router.post('/rides/:rideId/upi/order', requireRole('passenger'), [

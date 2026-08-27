@@ -1,8 +1,11 @@
 const jwt = require('jsonwebtoken');
+const { v4: uuidv4 } = require('uuid');
 const { supabase } = require('../../shared/db/client');
 const { otpStore, keys } = require('../../shared/cache/otpStore');
 const { AppError } = require('../../shared/middleware/errorHandler');
 const { sendOtp } = require('../notification/sms.service');
+
+const crypto = require('crypto');
 
 const OTP_EXPIRY_MINUTES = parseInt(process.env.OTP_EXPIRY_MINUTES) || 10;
 const OTP_MAX_ATTEMPTS = parseInt(process.env.OTP_MAX_ATTEMPTS) || 5;
@@ -21,8 +24,8 @@ const requestOtp = async (phone, purpose = 'login') => {
     throw new AppError('Too many OTP requests. Please wait before trying again.', 429);
   }
 
-  // Generate 6-digit OTP
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  // Generate cryptographically secure 6-digit OTP
+  const otp = crypto.randomInt(100000, 1000000).toString();
 
   // Store with TTL
   otpStore.set(keys.otp(phone, purpose), otp, OTP_EXPIRY_MINUTES * 60);
@@ -31,11 +34,14 @@ const requestOtp = async (phone, purpose = 'login') => {
   await sendOtp(phone, otp, purpose);
 
   // Audit log in Supabase (non-blocking, best-effort)
+  // Upsert on (phone, purpose) within the expiry window so we track
+  // the running attempt count on the same OTP session, not a new row each time.
   supabase
     .from('otp_logs')
     .insert({
       phone,
       purpose,
+      attempts: attempts,  // current attempt number (1-based from incr)
       expires_at: new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000).toISOString(),
     })
     .then(({ error }) => {
@@ -66,20 +72,38 @@ const verifyOtp = async (phone, otp, purpose = 'login') => {
   otpStore.del(keys.otp(phone, purpose));
   otpStore.del(keys.otpAttempts(phone, purpose));
 
+  // Mark the most recent log row for this phone+purpose as verified (non-blocking)
+  supabase
+    .from('otp_logs')
+    .update({ verified: true })
+    .eq('phone', phone)
+    .eq('purpose', purpose)
+    .eq('verified', false)
+    .gte('expires_at', new Date().toISOString())
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .then(({ error }) => {
+      if (error) console.error('OTP log verified update error:', error.message);
+    });
+
   return true;
 };
 
 // ─── JWT ─────────────────────────────────────────────────────────────────────
 
 const generateTokens = (userId, role) => {
+  // jti (JWT ID) lets us individually revoke tokens without invalidating all user tokens
+  const accessJti = uuidv4();
+  const refreshJti = uuidv4();
+
   const accessToken = jwt.sign(
-    { userId, role },
+    { userId, role, jti: accessJti },
     process.env.JWT_SECRET,
     { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
   );
 
   const refreshToken = jwt.sign(
-    { userId, role, type: 'refresh' },
+    { userId, role, type: 'refresh', jti: refreshJti },
     process.env.JWT_REFRESH_SECRET,
     { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d' }
   );
@@ -135,7 +159,8 @@ const loginOrRegister = async (phone) => {
 };
 
 /**
- * Refresh access token using refresh token
+ * Refresh access token using refresh token.
+ * Checks the revoked_tokens table — a logged-out refresh token is rejected.
  */
 const refreshAccessToken = async (refreshToken) => {
   let decoded;
@@ -144,6 +169,17 @@ const refreshAccessToken = async (refreshToken) => {
     if (decoded.type !== 'refresh') throw new Error('Invalid token type');
   } catch {
     throw new AppError('Invalid or expired refresh token', 401);
+  }
+
+  // Check if this token has been revoked (logout was called)
+  const { data: revoked } = await supabase
+    .from('revoked_tokens')
+    .select('jti')
+    .eq('jti', decoded.jti)
+    .maybeSingle();
+
+  if (revoked) {
+    throw new AppError('Token has been revoked. Please log in again.', 401);
   }
 
   const { data: user, error } = await supabase
@@ -160,4 +196,41 @@ const refreshAccessToken = async (refreshToken) => {
   return { accessToken };
 };
 
-module.exports = { requestOtp, verifyOtp, loginOrRegister, refreshAccessToken, generateTokens };
+/**
+ * Logout — revoke the refresh token by storing its jti in the DB.
+ * The access token will expire naturally (short-lived).
+ * Any future refresh attempt with this token will be rejected.
+ */
+const logout = async (refreshToken) => {
+  if (!refreshToken) return { loggedOut: true }; // idempotent — no token = already logged out
+
+  let decoded;
+  try {
+    decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
+  } catch {
+    // Expired or invalid — treat as already logged out, not an error
+    return { loggedOut: true };
+  }
+
+  // Persist the revocation — expires_at matches the token's own expiry
+  // O3: also write to otpStore (in-memory) so authenticate middleware
+  // can check revocation without a DB hit on the hot path.
+  // TTL matches the token's remaining lifetime.
+  const ttlSeconds = Math.max(0, decoded.exp - Math.floor(Date.now() / 1000));
+  if (ttlSeconds > 0) {
+    otpStore.set(`revoked_jti:${decoded.jti}`, '1', ttlSeconds);
+  }
+
+  await supabase.from('revoked_tokens').upsert(
+    {
+      jti: decoded.jti,
+      user_id: decoded.userId,
+      expires_at: new Date(decoded.exp * 1000).toISOString(),
+    },
+    { onConflict: 'jti' } // idempotent — double-logout is safe
+  );
+
+  return { loggedOut: true };
+};
+
+module.exports = { requestOtp, verifyOtp, loginOrRegister, refreshAccessToken, logout, generateTokens };

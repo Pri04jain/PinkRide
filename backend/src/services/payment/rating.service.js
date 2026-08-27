@@ -123,8 +123,8 @@ const getRideRatings = async (rideId) => {
 // The Flutter app polls this after a trip ends to prompt the rating screen.
 
 const getPendingRatings = async (userId) => {
-  // Find all completed rides this user was part of (as passenger OR driver)
-  const [passengerRides, driverRides] = await Promise.all([
+  // Fetch all three data sources in parallel — single round-trip to Supabase
+  const [passengerRides, driverRides, existingRatings] = await Promise.all([
     // Rides where user was a passenger
     supabase
       .from('ride_passengers')
@@ -139,7 +139,18 @@ const getPendingRatings = async (userId) => {
       .select('id, ended_at, drivers!inner(user_id), ride_passengers(passenger_id, users!inner(full_name))')
       .eq('drivers.user_id', userId)
       .eq('status', 'completed'),
+
+    // All ratings this user has already submitted — fetched ONCE, checked in-memory
+    supabase
+      .from('ratings')
+      .select('ride_id, rated_user')
+      .eq('rated_by', userId),
   ]);
+
+  // Build a Set of "rideId:ratedUserId" keys for O(1) lookup — eliminates all N+1 queries
+  const alreadyRated = new Set(
+    (existingRatings.data || []).map((r) => `${r.ride_id}:${r.rated_user}`)
+  );
 
   const pending = [];
 
@@ -151,16 +162,7 @@ const getPendingRatings = async (userId) => {
     const driverUserId = ride.drivers?.user_id;
     if (!driverUserId) continue;
 
-    // Has this user already rated the driver for this ride?
-    const { data: existing } = await supabase
-      .from('ratings')
-      .select('id')
-      .eq('ride_id', ride.id)
-      .eq('rated_by', userId)
-      .eq('rated_user', driverUserId)
-      .maybeSingle();
-
-    if (!existing) {
+    if (!alreadyRated.has(`${ride.id}:${driverUserId}`)) {
       pending.push({
         rideId: ride.id,
         endedAt: ride.ended_at,
@@ -174,15 +176,7 @@ const getPendingRatings = async (userId) => {
   // Check driver → passenger ratings
   for (const ride of driverRides.data || []) {
     for (const rp of ride.ride_passengers || []) {
-      const { data: existing } = await supabase
-        .from('ratings')
-        .select('id')
-        .eq('ride_id', ride.id)
-        .eq('rated_by', userId)
-        .eq('rated_user', rp.passenger_id)
-        .maybeSingle();
-
-      if (!existing) {
+      if (!alreadyRated.has(`${ride.id}:${rp.passenger_id}`)) {
         pending.push({
           rideId: ride.id,
           endedAt: ride.ended_at,

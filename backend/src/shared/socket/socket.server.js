@@ -1,6 +1,9 @@
 const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
 const { supabase } = require('../db/client');
+const trackingService = require('../../services/tracking/tracking.service');
+// Lazy-required to avoid circular dependency (safety → socket → safety)
+const getSafetyService = () => require('../../services/safety/safety.service');
 
 let io;
 
@@ -79,6 +82,10 @@ const initSocket = (httpServer) => {
 
       // Broadcast to everyone in the ride room except the sender
       socket.to(`ride:${rideId}`).emit('driver_location_update', payload);
+
+      // Run deviation detection asynchronously — errors are logged, never thrown
+      trackingService.processLocationUpdate(userId, rideId, lat, lng)
+        .catch((err) => console.error('[Tracking] processLocationUpdate error:', err.message));
     });
 
     // Passenger acknowledges a deviation alert
@@ -90,13 +97,15 @@ const initSocket = (httpServer) => {
       });
     });
 
-    // Passenger triggers SOS
-    socket.on('sos_triggered', ({ rideId }) => {
-      io.to(`ride:${rideId}`).emit('sos_alert', {
-        triggeredBy: userId,
-        rideId,
-        timestamp: Date.now(),
-      });
+    // Passenger triggers SOS — delegate to safetyService for full response:
+    // DB record + SMS to emergency contacts + FCM push to driver + socket broadcast.
+    // lat/lng are optional — client sends current position when available.
+    socket.on('sos_triggered', ({ rideId, lat, lng }) => {
+      if (!rideId || role !== 'passenger') return;
+
+      // Fire-and-forget — a slow SMS must never delay the socket acknowledgement
+      getSafetyService().triggerSOS(userId, rideId, lat || null, lng || null)
+        .catch((err) => console.error('[Socket] SOS trigger error:', err.message));
     });
 
     socket.on('leave_ride', ({ rideId }) => {

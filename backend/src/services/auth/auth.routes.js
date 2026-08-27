@@ -54,4 +54,7 @@ router.post(
 // POST /api/v1/auth/refresh-token
 router.post('/refresh-token', controller.refreshToken);
 
+// POST /api/v1/auth/logout
+router.post('/logout', controller.logout);
+
 module.exports = router;

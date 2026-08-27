@@ -6,12 +6,50 @@
  * Tokens are upserted on every login so they stay current.
  *
  * Push delivery:
- *   dev  → console.log (no Firebase SDK needed)
- *   prod → wire up firebase-admin here on Day 9
- *          (set FIREBASE_SERVICE_ACCOUNT_PATH in .env, npm i firebase-admin)
+ *   dev  → console.log (FIREBASE_PUSH_ENABLED not set or false)
+ *   prod → Firebase Admin SDK (FIREBASE_PUSH_ENABLED=true + credentials configured)
+ *
+ * Firebase credentials — two supported modes (pick one):
+ *   1. File path:   FIREBASE_SERVICE_ACCOUNT_PATH=/path/to/serviceAccount.json
+ *   2. Inline JSON: FIREBASE_SERVICE_ACCOUNT_JSON={"type":"service_account",...}
+ *      (useful on platforms like Railway/Render where you can't mount files)
  */
 
 const { supabase } = require('../../shared/db/client');
+
+// ─── Firebase Admin Init (lazy, singleton) ────────────────────────────────────
+
+let _messagingInstance = null;
+
+const getMessaging = () => {
+  if (_messagingInstance) return _messagingInstance;
+
+  const admin = require('firebase-admin');
+
+  // Avoid re-initialising if another module already did it
+  if (!admin.apps.length) {
+    let credential;
+
+    if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+      // Inline JSON — preferred for cloud deployments
+      const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+      credential = admin.credential.cert(serviceAccount);
+    } else if (process.env.FIREBASE_SERVICE_ACCOUNT_PATH) {
+      // File path — convenient for local dev
+      const serviceAccount = require(process.env.FIREBASE_SERVICE_ACCOUNT_PATH);
+      credential = admin.credential.cert(serviceAccount);
+    } else {
+      // Application Default Credentials (GCP / Cloud Run environments)
+      credential = admin.credential.applicationDefault();
+    }
+
+    admin.initializeApp({ credential });
+    console.log('[FCM] Firebase Admin initialised.');
+  }
+
+  _messagingInstance = admin.messaging();
+  return _messagingInstance;
+};
 
 // ─── Device Token Registration ────────────────────────────────────────────────
 
@@ -22,7 +60,6 @@ const { supabase } = require('../../shared/db/client');
  */
 const registerDeviceToken = async (userId, fcmToken, platform = 'android') => {
   // Deactivate stale tokens for this user on the same platform
-  // so we don't spam dead tokens when pushing
   await supabase
     .from('device_tokens')
     .update({ is_active: false })
@@ -63,30 +100,75 @@ const getActiveTokens = async (userId) => {
 
 /**
  * Send a push notification to all active devices for a user.
- * dev:  logs to console, returns { sent: true, dev: true }
- * prod: wire up firebase-admin here on Day 9
+ *
+ * Controlled by FIREBASE_PUSH_ENABLED env flag:
+ *   false / unset → logs to console (dev mode, no Firebase needed)
+ *   true          → sends via Firebase Admin SDK
+ *
+ * Handles dead tokens: if Firebase returns 'registration-token-not-registered'
+ * the token is automatically marked inactive in the DB so we don't keep
+ * hitting it on future pushes.
  */
 const sendToUser = async (userId, title, body, data = {}) => {
-  const isDev = process.env.NODE_ENV !== 'production';
+  const pushEnabled = process.env.FIREBASE_PUSH_ENABLED === 'true';
 
-  if (isDev) {
+  if (!pushEnabled) {
     console.log(`[FCM DEV] → ${userId}: "${title}" — ${body}`);
     return { sent: true, dev: true };
   }
 
-  // Production path — fetch tokens from DB and send via Firebase
   const tokens = await getActiveTokens(userId);
   if (!tokens.length) {
     console.warn(`[FCM] No active tokens for user ${userId}`);
     return { sent: false, reason: 'No active device tokens' };
   }
 
-  // TODO Day 9: Replace with real Firebase Admin SDK calls
-  // const { getMessaging } = require('firebase-admin/messaging');
-  // await getMessaging().sendEachForMulticast({ tokens, notification: { title, body }, data });
+  const messaging = getMessaging();
 
-  console.warn('[FCM] Production push not yet configured.');
-  return { sent: false, reason: 'FCM not configured' };
+  const message = {
+    tokens,
+    notification: { title, body },
+    // data values must all be strings for FCM
+    data: Object.fromEntries(
+      Object.entries(data).map(([k, v]) => [k, String(v)])
+    ),
+    android: {
+      priority: 'high',
+      notification: { sound: 'default' },
+    },
+    apns: {
+      payload: {
+        aps: { sound: 'default', badge: 1 },
+      },
+    },
+  };
+
+  const response = await messaging.sendEachForMulticast(message);
+
+  // Clean up dead tokens so we don't keep spamming them
+  const deadTokens = [];
+  response.responses.forEach((resp, idx) => {
+    if (
+      !resp.success &&
+      resp.error?.code === 'messaging/registration-token-not-registered'
+    ) {
+      deadTokens.push(tokens[idx]);
+    }
+  });
+
+  if (deadTokens.length) {
+    await supabase
+      .from('device_tokens')
+      .update({ is_active: false })
+      .in('fcm_token', deadTokens);
+    console.warn(`[FCM] Deactivated ${deadTokens.length} dead token(s) for user ${userId}`);
+  }
+
+  return {
+    sent: true,
+    successCount: response.successCount,
+    failureCount: response.failureCount,
+  };
 };
 
 // ─── Notification Templates ───────────────────────────────────────────────────
@@ -118,6 +200,12 @@ const notify = {
 
   newRideRequest: (driverUserId, pickupAddress, fareAmount) =>
     sendToUser(driverUserId, 'New Ride Request', `Pickup: ${pickupAddress} — ₹${fareAmount}`, { type: 'new_ride_request' }),
+
+  newDriverApplication: (adminUserId, driverName) =>
+    sendToUser(adminUserId, 'New Driver Application', `${driverName} has submitted all documents and is ready for review.`, { type: 'new_driver_application' }),
+
+  applicationUnderReview: (driverUserId) =>
+    sendToUser(driverUserId, 'Application Received', 'All your documents have been submitted. Our team will review your application within 24 hours.', { type: 'application_under_review' }),
 };
 
 module.exports = { registerDeviceToken, getActiveTokens, sendToUser, notify };

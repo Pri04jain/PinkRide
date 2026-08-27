@@ -47,6 +47,13 @@ const getPendingFines = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const collectFine = async (req, res, next) => {
+  try {
+    const result = await paymentService.collectFine(req.params.fineId);
+    return success(res, result, result.collected ? 'Fine collected.' : result.reason);
+  } catch (err) { next(err); }
+};
+
 // ─── Ratings ──────────────────────────────────────────────────────────────────
 
 const submitRating = async (req, res, next) => {
@@ -88,6 +95,6 @@ const getUserRatings = async (req, res, next) => {
 
 module.exports = {
   createUpiOrder, verifyUpiPayment, confirmCashPayment,
-  getWallet, getPendingFines,
+  getWallet, getPendingFines, collectFine,
   submitRating, getPendingRatings, getRideRatings, getUserRatings,
 };

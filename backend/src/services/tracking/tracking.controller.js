@@ -29,4 +29,11 @@ const acknowledgeDeviation = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { getDriverLocation, getRideDeviations, acknowledgeDeviation };
+const getRideLocationHistory = async (req, res, next) => {
+  try {
+    const history = await trackingService.getRideLocationHistory(req.params.rideId);
+    return success(res, { history, count: history.length });
+  } catch (err) { next(err); }
+};
+
+module.exports = { getDriverLocation, getRideDeviations, acknowledgeDeviation, getRideLocationHistory };
