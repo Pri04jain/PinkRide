@@ -343,7 +343,7 @@ Full list in `.env.example`. Here's what each one does:
 
 ## Author
 
-Built by Priya — Jaipur.
+Built by Priyanjal — Jaipur.
 
 ---
 
