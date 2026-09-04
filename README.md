@@ -114,7 +114,8 @@ PinkRide/
 - Rate limited — max 5 OTP requests per hour per number
 - Role-based: passenger, driver, admin
 
-### Face Verification (DPDP Act 2025 Compliant)
+### Face verify
+(DPDP Act 2025 Compliant)
 - Explicit consent screen shown before any biometric is captured
 - Liveness check — eyes open, face visible, no sunglasses, looking at camera
 - Only an encrypted face embedding is stored — original photo discarded immediately
@@ -339,12 +340,11 @@ Full list in `.env.example`. Here's what each one does:
 - [ ] Insurance partnerships
 - [ ] Driver subscription plans
 
----
+
 
 ## Author
 
 Built by Priyanjal — Jaipur.
 
----
 
 *PinkRide does not claim to guarantee safety. It reduces risk through verified identities, multiple accountability layers, and real-time safety tools. Every layer matters.*
