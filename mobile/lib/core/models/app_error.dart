@@ -1,28 +1,3 @@
-// AppError — typed error model for all API and app failures.
-//
-// WHY A DEDICATED ERROR CLASS?
-// Without this, every screen has to catch raw DioException objects and
-// figure out what went wrong from the HTTP status code and raw JSON.
-// AppError gives us a clean, predictable shape everywhere:
-//
-//   try {
-//     await apiClient.post('/rides/book', data: {...});
-//   } on AppError catch (e) {
-//     // e.message is always a human-readable string ready to show the user
-//     // e.statusCode tells us exactly what happened (404, 401, 422, etc.)
-//     // e.type tells us the category so we can handle it programmatically
-//   }
-//
-// ERROR FLOW:
-//   Raw DioException
-//       ↓
-//   ApiClient._handleError()   ← converts to AppError
-//       ↓
-//   AppError thrown to the caller
-//       ↓
-//   UI catches AppError and shows e.message to the user
-//
-// This means NO screen ever needs to parse raw JSON error responses.
 
 enum AppErrorType {
   /// 401 — not logged in, or token revoked
