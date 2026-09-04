@@ -5,6 +5,9 @@ import 'package:go_router/go_router.dart';
 import '../providers/auth_provider.dart';
 import '../providers/auth_state.dart';
 import '../theme/app_theme.dart';
+import '../../features/auth/screens/phone_input_screen.dart';
+import '../../features/auth/screens/otp_verify_screen.dart';
+import '../../features/auth/screens/profile_setup_screen.dart';
 
 /// Route path constants — single source of truth for all navigation.
 /// Use these everywhere instead of raw strings like '/auth/phone'.
@@ -107,18 +110,27 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const SplashScreen(),
       ),
 
-      // ── Auth (Task 3) ─────────────────────────────────────────────────────
+      // ── Auth ──────────────────────────────────────────────────────────────
       GoRoute(
         path: AppRoutes.phoneInput,
-        builder: (context, state) => const _PlaceholderScreen('Phone Input'),
+        builder: (context, state) => const PhoneInputScreen(),
       ),
       GoRoute(
         path: AppRoutes.otpVerify,
-        builder: (context, state) => const _PlaceholderScreen('OTP Verify'),
+        builder: (context, state) {
+          // OtpVerifyScreen needs phone + countryCode passed from PhoneInputScreen.
+          // go_router passes arbitrary objects via state.extra.
+          // We cast it here and fall back to empty strings if somehow missing.
+          final extra = state.extra as Map<String, dynamic>? ?? {};
+          return OtpVerifyScreen(
+            phone: extra['phone'] as String? ?? '',
+            countryCode: extra['countryCode'] as String? ?? '+91',
+          );
+        },
       ),
       GoRoute(
         path: AppRoutes.profileSetup,
-        builder: (context, state) => const _PlaceholderScreen('Profile Setup'),
+        builder: (context, state) => const ProfileSetupScreen(),
       ),
 
       // ── Passenger (Task 5) ────────────────────────────────────────────────
