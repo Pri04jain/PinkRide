@@ -8,6 +8,10 @@ import '../theme/app_theme.dart';
 import '../../features/auth/screens/phone_input_screen.dart';
 import '../../features/auth/screens/otp_verify_screen.dart';
 import '../../features/auth/screens/profile_setup_screen.dart';
+import '../../features/verification/screens/consent_screen.dart';
+import '../../features/verification/screens/face_register_screen.dart';
+import '../../features/verification/screens/pre_ride_face_screen.dart';
+import '../../features/verification/screens/verification_status_screen.dart';
 
 /// Route path constants — single source of truth for all navigation.
 /// Use these everywhere instead of raw strings like '/auth/phone'.
@@ -23,6 +27,11 @@ class AppRoutes {
   // Face verification
   static const String faceConsent = '/verification/consent';
   static const String faceRegister = '/verification/register';
+  static const String verificationStatus = '/verification/status';
+  static const String preRideFace = '/verification/ride-face';
+
+  // Ride OTP entry (after pre-ride face check)
+  static const String otpEntry = '/ride/otp';
 
   // Passenger
   static const String passengerHome = '/passenger/home';
@@ -131,6 +140,35 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.profileSetup,
         builder: (context, state) => const ProfileSetupScreen(),
+      ),
+
+      // ── Verification (Task 4) ─────────────────────────────────────────────
+      GoRoute(
+        path: AppRoutes.faceConsent,
+        builder: (context, state) => const ConsentScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.faceRegister,
+        builder: (context, state) => const FaceRegisterScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.verificationStatus,
+        builder: (context, state) => const VerificationStatusScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.preRideFace,
+        builder: (context, state) {
+          final extra = state.extra as Map<String, dynamic>? ?? {};
+          return PreRideFaceScreen(
+            ridePassengerId: extra['ridePassengerId'] as String? ?? '',
+            rideId: extra['rideId'] as String? ?? '',
+          );
+        },
+      ),
+      // OTP entry after face check — placeholder until Task 6 (active ride)
+      GoRoute(
+        path: AppRoutes.otpEntry,
+        builder: (context, state) => const _PlaceholderScreen('OTP Entry'),
       ),
 
       // ── Passenger (Task 5) ────────────────────────────────────────────────

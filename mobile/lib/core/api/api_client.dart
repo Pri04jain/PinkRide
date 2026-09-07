@@ -8,31 +8,6 @@ import '../constants/app_constants.dart';
 import '../models/app_error.dart';
 import '../utils/storage_service.dart';
 
-/// ApiClient — the single HTTP client used by every feature in the app.
-///
-/// HOW DIO WORKS (vs the basic `http` package):
-/// ┌─────────────────────────────────────────────────────┐
-/// │  Request                                            │
-/// │    → Interceptor 1 (AuthInterceptor — attach token) │
-/// │    → Interceptor 2 (LogInterceptor — print in dev)  │
-/// │    → Dio sends HTTP request                         │
-/// │  Response                                           │
-/// │    ← Interceptor 2 (log response)                   │
-/// │    ← Interceptor 1 (handle 401 → refresh token)     │
-/// │    ← Your code receives clean data                  │
-/// └─────────────────────────────────────────────────────┘
-///
-/// Without interceptors you would need to manually:
-///   - Add "Authorization: Bearer <token>" to EVERY request
-///   - Check if the response is 401 and refresh EVERY time
-///   - That's hundreds of lines of repetition across all features
-///
-/// With interceptors: write it once here, it applies everywhere automatically.
-
-// ── Riverpod Provider ─────────────────────────────────────────────────────────
-// Makes ApiClient available throughout the app via:
-//   final api = ref.watch(apiClientProvider);
-// No need to pass it through constructors.
 
 final apiClientProvider = Provider<ApiClient>((ref) => ApiClient());
 
@@ -243,34 +218,10 @@ class ApiClient {
   }
 }
 
-// ── Auth Interceptor ──────────────────────────────────────────────────────────
-//
-// This interceptor runs on EVERY request and response automatically.
-//
-// ON REQUEST:
-//   - Reads the access token from secure storage
-//   - Adds it as: Authorization: Bearer <token>
-//   - If no token exists, request goes out without auth header
-//     (public endpoints like /auth/request-otp don't need it)
-//
-// ON RESPONSE (401 only):
-//   - The access token expired mid-session
-//   - We silently fetch a new access token using the refresh token
-//   - Retry the original request with the new token
-//   - The user never sees a "session expired" error during normal use
-//   - If the refresh also fails → clear tokens → user must log in again
-//
-// WHY IN AN INTERCEPTOR AND NOT IN EACH SERVICE?
-//   If you did this in each service, you'd have the same try/catch/refresh
-//   logic in bookRide, getProfile, acceptRide, triggerSOS... everywhere.
-//   Here it's written once and works for every request automatically.
-
 class _AuthInterceptor extends Interceptor {
   final Dio _dio;
 
-  // Tracks if we're already trying to refresh.
-  // Prevents an infinite loop where the refresh request itself gets a 401
-  // and triggers another refresh attempt.
+
   bool _isRefreshing = false;
 
   _AuthInterceptor(this._dio);
@@ -309,9 +260,7 @@ class _AuthInterceptor extends Interceptor {
     handler.next(response);
   }
 
-  /// Attempts to get a new access token using the stored refresh token,
-  /// then retries the original failed request.
-  /// Returns null if refresh fails (user must re-login).
+  
   Future<Response?> _tryRefreshAndRetry(RequestOptions original) async {
     _isRefreshing = true;
 

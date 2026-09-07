@@ -1,17 +1,4 @@
-// UserModel — represents the currently logged-in user.
-//
-// WHY NOT USE A MAP<STRING, DYNAMIC>?
-// The backend sends JSON like:
-//   { "id": "uuid", "role": "passenger", "full_name": "Priya", ... }
-//
-// If we pass that map around, every screen has to write:
-//   final name = user['full_name'] as String?;   // typo-prone, no autocomplete
-//
-// With a typed model:
-//   final name = user.fullName;  // autocomplete, compile-time checked
-//
-// This class uses plain Dart (no code generation) so it's easy to read.
-// In Task 3 onwards we use freezed for more complex models.
+
 
 enum UserRole { passenger, driver, admin, unknown }
 
@@ -64,10 +51,6 @@ class UserModel {
     );
   }
 
-  // ── copyWith ───────────────────────────────────────────────────────────────
-  // Creates a new UserModel with some fields changed.
-  // Used when profile is updated without re-fetching from the server.
-  // Example: user.copyWith(walletBalance: user.walletBalance + 500)
 
   UserModel copyWith({
     String? fullName,
