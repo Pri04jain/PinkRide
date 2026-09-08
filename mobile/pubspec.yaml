@@ -61,11 +61,11 @@ dependencies:
   # happen — essential for real-time tracking.
   socket_io_client: ^2.0.3+1
 
-  # ── Maps ────────────────────────────────────────────────────────────────────
-  # google_maps_flutter: renders Google Maps with markers, polylines, camera.
-  # Used on the passenger home screen and the active ride tracking screen.
-  # Requires a Google Maps API key (same one we configured in the backend).
-  google_maps_flutter: ^2.9.0
+  # ── Maps (OpenStreetMap — free, no API key needed) ──────────────────────────
+  # flutter_map: renders OpenStreetMap tiles. No account, no credit card.
+  # latlong2: LatLng type used by flutter_map (different from google_maps_flutter).
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
 
   # ── Camera ──────────────────────────────────────────────────────────────────
   # camera: accesses the device camera for face verification selfies.

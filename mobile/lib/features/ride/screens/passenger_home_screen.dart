@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../../../core/providers/auth_provider.dart';
 import '../../../core/router/app_router.dart';
@@ -14,41 +15,17 @@ import 'ride_booking_sheet.dart';
 
 /// PassengerHomeScreen — the main screen for passengers.
 ///
-/// LAYOUT (from top to bottom):
-///   ┌─────────────────────────────┐
-///   │  App bar (greeting + wallet)│
-///   │                             │
-///   │      Google Map             │ ← full screen behind everything
-///   │                             │
-///   └─────────────────────────────┘
-///   ┌─────────────────────────────┐
-///   │  White bottom card          │
-///   │  ─ Pickup input             │
-///   │  ─ Drop input               │
-///   │  ─ Ride type chips          │
-///   │  ─ Fare estimate card       │
-///   │  ─ Book Ride button         │
-///   └─────────────────────────────┘
+/// LAYOUT:
+///   Full-screen OpenStreetMap (flutter_map — free, no API key)
+///   Top overlay: greeting card + wallet badge
+///   Bottom card: pickup/drop inputs, ride type, fare estimate, book button
 ///
-/// HOW GoogleMap WORKS:
-///   GoogleMap is a widget that renders a native map view.
-///   It needs:
-///     - initialCameraPosition: where the map starts (lat/lng + zoom)
-///     - onMapCreated: callback that gives us the GoogleMapController
-///       (we store it so we can animate the camera later)
-///     - markers: a Set<Marker> for pickup/drop pins
-///
-///   Moving the camera (animating to user location):
-///     _mapController.animateCamera(
-///       CameraUpdate.newLatLngZoom(LatLng(lat, lng), 15)
-///     )
-///
-/// GEOLOCATOR:
-///   Gets the device GPS position.
-///   We call it in initState via BookingNotifier.getCurrentLocation().
-///   Result is used to:
-///     1. Move the map camera to the user's location
-///     2. Set the default pickup location
+/// flutter_map vs google_maps_flutter:
+///   flutter_map uses OpenStreetMap tiles — completely free, no account needed.
+///   The API is similar: MapController ≈ GoogleMapController,
+///   LatLng from latlong2 ≈ LatLng from google_maps_flutter,
+///   Marker widget ≈ Marker object.
+///   Main difference: markers are widgets in a MarkerLayer, not a Set<Marker>.
 
 class PassengerHomeScreen extends ConsumerStatefulWidget {
   const PassengerHomeScreen({super.key});
@@ -59,23 +36,26 @@ class PassengerHomeScreen extends ConsumerStatefulWidget {
 }
 
 class _PassengerHomeScreenState extends ConsumerState<PassengerHomeScreen> {
-  GoogleMapController? _mapController;
+  // MapController gives us programmatic control (move camera, zoom, etc.)
+  final _mapController = MapController();
 
-  // Jaipur city centre — default camera position before GPS loads
-  static const _defaultPosition = CameraPosition(
-    target: LatLng(26.9124, 75.7873),
-    zoom: 13,
-  );
+  // Jaipur city centre — camera starts here before GPS loads
+  static const _defaultCenter = LatLng(26.9124, 75.7873);
+  static const _defaultZoom = 13.0;
 
   @override
   void initState() {
     super.initState();
-    // Run after first frame so ref is available
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initLocation();
-      // Check if there's an active ride already (app relaunch mid-ride)
       ref.read(activeRideProvider.notifier).checkForActiveRide();
     });
+  }
+
+  @override
+  void dispose() {
+    _mapController.dispose();
+    super.dispose();
   }
 
   Future<void> _initLocation() async {
@@ -83,16 +63,12 @@ class _PassengerHomeScreenState extends ConsumerState<PassengerHomeScreen> {
         await ref.read(bookingProvider.notifier).getCurrentLocation();
     if (position == null || !mounted) return;
 
-    // Move map camera to user's actual location
-    _mapController?.animateCamera(
-      CameraUpdate.newLatLngZoom(
-        LatLng(position.latitude, position.longitude),
-        15,
-      ),
+    // Move camera to user's GPS position
+    _mapController.move(
+      LatLng(position.latitude, position.longitude),
+      15,
     );
 
-    // Pre-fill pickup with current GPS coordinates
-    // Address is "Current Location" — a real app would reverse-geocode this
     ref.read(bookingProvider.notifier).setPickup(
           RideLocation(
             lat: position.latitude,
@@ -102,49 +78,19 @@ class _PassengerHomeScreenState extends ConsumerState<PassengerHomeScreen> {
         );
   }
 
-  // Build map markers for pickup and drop pins
-  Set<Marker> _buildMarkers(BookingFormState form) {
-    final markers = <Marker>{};
-
-    if (form.pickup != null) {
-      markers.add(Marker(
-        markerId: const MarkerId('pickup'),
-        position: LatLng(form.pickup!.lat, form.pickup!.lng),
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
-        infoWindow: InfoWindow(title: 'Pickup', snippet: form.pickup!.address),
-      ));
-    }
-
-    if (form.drop != null) {
-      markers.add(Marker(
-        markerId: const MarkerId('drop'),
-        position: LatLng(form.drop!.lat, form.drop!.lng),
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-        infoWindow: InfoWindow(title: 'Drop', snippet: form.drop!.address),
-      ));
-    }
-
-    return markers;
-  }
-
-  // When both pickup and drop are set, animate map to show both markers
+  // Animate camera to show both pickup and drop markers
   void _fitMapToBothLocations(BookingFormState form) {
     if (form.pickup == null || form.drop == null) return;
-    if (_mapController == null) return;
 
-    final bounds = LatLngBounds(
-      southwest: LatLng(
-        form.pickup!.lat < form.drop!.lat ? form.pickup!.lat : form.drop!.lat,
-        form.pickup!.lng < form.drop!.lng ? form.pickup!.lng : form.drop!.lng,
-      ),
-      northeast: LatLng(
-        form.pickup!.lat > form.drop!.lat ? form.pickup!.lat : form.drop!.lat,
-        form.pickup!.lng > form.drop!.lng ? form.pickup!.lng : form.drop!.lng,
-      ),
-    );
+    // LatLngBounds from latlong2 takes a list of LatLng points
+    final bounds = LatLngBounds.fromPoints([
+      LatLng(form.pickup!.lat, form.pickup!.lng),
+      LatLng(form.drop!.lat, form.drop!.lng),
+    ]);
 
-    _mapController!.animateCamera(
-      CameraUpdate.newLatLngBounds(bounds, 80), // 80px padding
+    // fitBounds pads the view so both markers are visible
+    _mapController.fitCamera(
+      CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(80)),
     );
   }
 
@@ -153,53 +99,99 @@ class _PassengerHomeScreenState extends ConsumerState<PassengerHomeScreen> {
     final form = ref.watch(bookingFormProvider);
     final bookingState = ref.watch(bookingProvider);
     final user = ref.watch(currentUserProvider);
-    // Watch activeRideProvider so the screen rebuilds when ride state changes
     ref.watch(activeRideProvider);
 
-    // Navigate to active ride screen when a booking succeeds
     ref.listen<BookingState>(bookingProvider, (_, next) {
       if (next is BookingSuccess) {
         ref.read(activeRideProvider.notifier).startTracking(next.ride.id);
         context.push(
-          AppRoutes.activeRide.replaceAll(':rideId', next.ride.id),
-        );
+            AppRoutes.activeRide.replaceAll(':rideId', next.ride.id));
         ref.read(bookingProvider.notifier).reset();
       }
     });
 
-    // Navigate to active ride screen if there's already an active ride
     ref.listen<ActiveRideState>(activeRideProvider, (_, next) {
       if (next is ActiveRideLoaded && !next.ride.isCompleted) {
-        // Only auto-navigate if we're still on the home screen
         final location = GoRouterState.of(context).matchedLocation;
         if (location == AppRoutes.passengerHome) {
           context.push(
-            AppRoutes.activeRide.replaceAll(':rideId', next.ride.id),
-          );
+              AppRoutes.activeRide.replaceAll(':rideId', next.ride.id));
         }
       }
     });
 
-    // Fit map to show both markers when drop is set
     if (form.pickup != null && form.drop != null) {
       WidgetsBinding.instance.addPostFrameCallback(
-        (_) => _fitMapToBothLocations(form),
-      );
+          (_) => _fitMapToBothLocations(form));
     }
 
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: Stack(
         children: [
-          // ── Full-screen Google Map ───────────────────────────────────────
-          GoogleMap(
-            initialCameraPosition: _defaultPosition,
-            onMapCreated: (controller) => _mapController = controller,
-            markers: _buildMarkers(form),
-            myLocationEnabled: true,      // blue dot on user's position
-            myLocationButtonEnabled: false, // we have our own button
-            zoomControlsEnabled: false,    // cleaner UI without zoom buttons
-            mapToolbarEnabled: false,
+          // ── OpenStreetMap (flutter_map) ──────────────────────────────────
+          FlutterMap(
+            mapController: _mapController,
+            options: const MapOptions(
+              initialCenter: _defaultCenter,
+              initialZoom: _defaultZoom,
+              interactionOptions: InteractionOptions(
+                // Allow pinch zoom and pan — disable rotation (not needed)
+                flags: InteractiveFlag.pinchZoom |
+                    InteractiveFlag.drag |
+                    InteractiveFlag.doubleTapZoom,
+              ),
+            ),
+            children: [
+              // Tile layer — fetches map images from OpenStreetMap servers
+              TileLayer(
+                urlTemplate:
+                    'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                // User agent required by OSM tile usage policy
+                userAgentPackageName: 'com.pinkride.pinkride',
+              ),
+
+              // Marker layer — pickup (green) and drop (pink) pins
+              MarkerLayer(
+                markers: [
+                  if (form.pickup != null)
+                    Marker(
+                      point: LatLng(form.pickup!.lat, form.pickup!.lng),
+                      width: 40,
+                      height: 40,
+                      child: const Icon(
+                        Icons.location_on,
+                        color: AppTheme.success,
+                        size: 36,
+                        shadows: [
+                          Shadow(blurRadius: 4, color: Colors.black26)
+                        ],
+                      ),
+                    ),
+                  if (form.drop != null)
+                    Marker(
+                      point: LatLng(form.drop!.lat, form.drop!.lng),
+                      width: 40,
+                      height: 40,
+                      child: const Icon(
+                        Icons.location_on,
+                        color: AppTheme.primary,
+                        size: 36,
+                        shadows: [
+                          Shadow(blurRadius: 4, color: Colors.black26)
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+
+              // OSM attribution — required by OpenStreetMap tile usage policy
+              const RichAttributionWidget(
+                attributions: [
+                  TextSourceAttribution('OpenStreetMap contributors'),
+                ],
+              ),
+            ],
           ),
 
           // ── Top bar overlay ──────────────────────────────────────────────
@@ -213,7 +205,6 @@ class _PassengerHomeScreenState extends ConsumerState<PassengerHomeScreen> {
                     horizontal: 16, vertical: 8),
                 child: Row(
                   children: [
-                    // Greeting card
                     Expanded(
                       child: Container(
                         padding: const EdgeInsets.symmetric(
@@ -247,8 +238,6 @@ class _PassengerHomeScreenState extends ConsumerState<PassengerHomeScreen> {
                       ),
                     ),
                     const SizedBox(width: 8),
-
-                    // Wallet balance button
                     _WalletBadge(balance: user?.walletBalance ?? 0),
                   ],
                 ),
@@ -256,7 +245,7 @@ class _PassengerHomeScreenState extends ConsumerState<PassengerHomeScreen> {
             ),
           ),
 
-          // ── My location button ───────────────────────────────────────────
+          // ── My location FAB ──────────────────────────────────────────────
           Positioned(
             right: 16,
             bottom: _bottomCardHeight(context) + 16,
@@ -291,18 +280,14 @@ class _PassengerHomeScreenState extends ConsumerState<PassengerHomeScreen> {
     );
   }
 
-  // Approximate height of bottom card — used to position FAB above it
-  double _bottomCardHeight(BuildContext context) {
-    final mediaQuery = MediaQuery.of(context);
-    return 320 + mediaQuery.padding.bottom;
-  }
+  double _bottomCardHeight(BuildContext context) =>
+      320 + MediaQuery.of(context).padding.bottom;
 
   void _showBookingSheet(BuildContext context, BookingFormState form) {
     if (!form.canBook) return;
-
     showModalBottomSheet(
       context: context,
-      isScrollControlled: true,     // lets the sheet be full height
+      isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => const RideBookingSheet(),
     );
@@ -336,16 +321,14 @@ class _BottomBookingCard extends StatelessWidget {
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black12,
-            blurRadius: 16,
-            offset: Offset(0, -4),
-          ),
+              color: Colors.black12,
+              blurRadius: 16,
+              offset: Offset(0, -4)),
         ],
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Drag handle
           Container(
             width: 36,
             height: 4,
@@ -355,18 +338,14 @@ class _BottomBookingCard extends StatelessWidget {
               borderRadius: BorderRadius.circular(2),
             ),
           ),
-
           Padding(
             padding: EdgeInsets.fromLTRB(
-              16,
-              0,
-              16,
+              16, 0, 16,
               MediaQuery.of(context).padding.bottom + 16,
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // ── Location inputs ────────────────────────────────────
                 LocationInputField(
                   hint: 'Pickup location',
                   icon: Icons.radio_button_checked,
@@ -375,8 +354,6 @@ class _BottomBookingCard extends StatelessWidget {
                   onLocationSelected: onPickupChanged,
                 ),
                 const SizedBox(height: 2),
-
-                // Dotted connector between pickup and drop
                 Padding(
                   padding: const EdgeInsets.only(left: 19),
                   child: Column(
@@ -391,7 +368,6 @@ class _BottomBookingCard extends StatelessWidget {
                     ),
                   ),
                 ),
-
                 LocationInputField(
                   hint: 'Where to?',
                   icon: Icons.location_on,
@@ -399,27 +375,16 @@ class _BottomBookingCard extends StatelessWidget {
                   value: form.drop?.address,
                   onLocationSelected: onDropChanged,
                 ),
-
                 const SizedBox(height: 16),
-
-                // ── Ride type selector ─────────────────────────────────
                 RideTypeSelector(
-                  selected: form.rideType,
-                  onChanged: onRideTypeChanged,
-                ),
-
+                    selected: form.rideType, onChanged: onRideTypeChanged),
                 const SizedBox(height: 14),
-
-                // ── Fare estimate card ─────────────────────────────────
                 FareEstimateCard(
                   estimate: form.estimate,
                   isLoading: form.isEstimating,
                   errorMessage: form.estimateError,
                 ),
-
                 const SizedBox(height: 14),
-
-                // ── Book button ────────────────────────────────────────
                 SizedBox(
                   width: double.infinity,
                   height: 52,
@@ -430,8 +395,7 @@ class _BottomBookingCard extends StatelessWidget {
                       disabledBackgroundColor:
                           AppTheme.primaryLight.withOpacity(0.4),
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
+                          borderRadius: BorderRadius.circular(14)),
                       elevation: 0,
                     ),
                     child: bookingState is BookingInProgress
@@ -439,9 +403,7 @@ class _BottomBookingCard extends StatelessWidget {
                             width: 22,
                             height: 22,
                             child: CircularProgressIndicator(
-                              color: Colors.white,
-                              strokeWidth: 2.5,
-                            ),
+                                color: Colors.white, strokeWidth: 2.5),
                           )
                         : const Text(
                             'Book Ride',
@@ -477,10 +439,9 @@ class _WalletBadge extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 8,
+              offset: const Offset(0, 2)),
         ],
       ),
       child: Row(

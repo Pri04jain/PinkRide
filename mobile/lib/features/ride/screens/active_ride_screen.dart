@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../../../core/router/app_router.dart';
 import '../../../core/theme/app_theme.dart';
@@ -40,12 +41,11 @@ class ActiveRideScreen extends ConsumerStatefulWidget {
 }
 
 class _ActiveRideScreenState extends ConsumerState<ActiveRideScreen> {
-  GoogleMapController? _mapController;
+  final _mapController = MapController();
 
   @override
   void initState() {
     super.initState();
-    // Start polling this specific ride
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(activeRideProvider.notifier).startTracking(widget.rideId);
     });
@@ -53,49 +53,40 @@ class _ActiveRideScreenState extends ConsumerState<ActiveRideScreen> {
 
   @override
   void dispose() {
-    _mapController?.dispose();
+    _mapController.dispose();
     super.dispose();
   }
 
-  Set<Marker> _buildMarkers(RideModel ride) {
-    return {
-      // Pickup — green marker
+  List<Marker> _buildMarkers(RideModel ride) {
+    return [
+      // Pickup — green pin
       Marker(
-        markerId: const MarkerId('pickup'),
-        position: LatLng(ride.pickupLat, ride.pickupLng),
-        icon: BitmapDescriptor.defaultMarkerWithHue(
-            BitmapDescriptor.hueGreen),
-        infoWindow: InfoWindow(
-            title: 'Pickup', snippet: ride.pickupAddress),
+        point: LatLng(ride.pickupLat, ride.pickupLng),
+        width: 40,
+        height: 40,
+        child: const Icon(Icons.location_on,
+            color: AppTheme.success, size: 36,
+            shadows: [Shadow(blurRadius: 4, color: Colors.black26)]),
       ),
-      // Drop — red marker
+      // Drop — pink pin
       Marker(
-        markerId: const MarkerId('drop'),
-        position: LatLng(ride.dropLat, ride.dropLng),
-        icon:
-            BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-        infoWindow:
-            InfoWindow(title: 'Drop', snippet: ride.dropAddress),
+        point: LatLng(ride.dropLat, ride.dropLng),
+        width: 40,
+        height: 40,
+        child: const Icon(Icons.location_on,
+            color: AppTheme.primary, size: 36,
+            shadows: [Shadow(blurRadius: 4, color: Colors.black26)]),
       ),
-    };
+    ];
   }
 
-  // Fit the camera to show both pickup and drop
   void _fitMap(RideModel ride) {
-    _mapController?.animateCamera(
-      CameraUpdate.newLatLngBounds(
-        LatLngBounds(
-          southwest: LatLng(
-            ride.pickupLat < ride.dropLat ? ride.pickupLat : ride.dropLat,
-            ride.pickupLng < ride.dropLng ? ride.pickupLng : ride.dropLng,
-          ),
-          northeast: LatLng(
-            ride.pickupLat > ride.dropLat ? ride.pickupLat : ride.dropLat,
-            ride.pickupLng > ride.dropLng ? ride.pickupLng : ride.dropLng,
-          ),
-        ),
-        80,
-      ),
+    final bounds = LatLngBounds.fromPoints([
+      LatLng(ride.pickupLat, ride.pickupLng),
+      LatLng(ride.dropLat, ride.dropLng),
+    ]);
+    _mapController.fitCamera(
+      CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(80)),
     );
   }
 
@@ -133,10 +124,7 @@ class _ActiveRideScreenState extends ConsumerState<ActiveRideScreen> {
           ActiveRideCancelling(:final ride) => _RideView(
               ride: ride,
               mapController: _mapController,
-              onMapCreated: (c) {
-                _mapController = c;
-                _fitMap(ride);
-              },
+              onFitMap: () => _fitMap(ride),
               markers: _buildMarkers(ride),
               isCancelling: true,
               onCancelTap: () {},
@@ -144,11 +132,8 @@ class _ActiveRideScreenState extends ConsumerState<ActiveRideScreen> {
           ActiveRideLoaded(:final ride) => _RideView(
               ride: ride,
               mapController: _mapController,
-              onMapCreated: (c) {
-                _mapController = c;
-                WidgetsBinding.instance.addPostFrameCallback(
-                    (_) => _fitMap(ride));
-              },
+              onFitMap: () => WidgetsBinding.instance
+                  .addPostFrameCallback((_) => _fitMap(ride)),
               markers: _buildMarkers(ride),
               isCancelling: false,
               onCancelTap: () => _showCancelDialog(context),
@@ -211,16 +196,16 @@ class _ActiveRideScreenState extends ConsumerState<ActiveRideScreen> {
 
 class _RideView extends StatelessWidget {
   final RideModel ride;
-  final GoogleMapController? mapController;
-  final void Function(GoogleMapController) onMapCreated;
-  final Set<Marker> markers;
+  final MapController mapController;
+  final VoidCallback onFitMap;
+  final List<Marker> markers;
   final bool isCancelling;
   final VoidCallback onCancelTap;
 
   const _RideView({
     required this.ride,
     required this.mapController,
-    required this.onMapCreated,
+    required this.onFitMap,
     required this.markers,
     required this.isCancelling,
     required this.onCancelTap,
@@ -231,17 +216,26 @@ class _RideView extends StatelessWidget {
     return Stack(
       fit: StackFit.expand,
       children: [
-        // ── Map ──────────────────────────────────────────────────────────
-        GoogleMap(
-          initialCameraPosition: CameraPosition(
-            target: LatLng(ride.pickupLat, ride.pickupLng),
-            zoom: 14,
+        // ── OpenStreetMap ─────────────────────────────────────────────────
+        FlutterMap(
+          mapController: mapController,
+          options: MapOptions(
+            initialCenter: LatLng(ride.pickupLat, ride.pickupLng),
+            initialZoom: 14,
+            onMapReady: onFitMap, // fit bounds once tiles load
           ),
-          onMapCreated: onMapCreated,
-          markers: markers,
-          zoomControlsEnabled: false,
-          mapToolbarEnabled: false,
-          myLocationEnabled: false,
+          children: [
+            TileLayer(
+              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              userAgentPackageName: 'com.pinkride.pinkride',
+            ),
+            MarkerLayer(markers: markers),
+            const RichAttributionWidget(
+              attributions: [
+                TextSourceAttribution('OpenStreetMap contributors'),
+              ],
+            ),
+          ],
         ),
 
         // ── Top status banner ─────────────────────────────────────────────
