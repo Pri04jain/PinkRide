@@ -12,6 +12,8 @@ import '../../features/verification/screens/consent_screen.dart';
 import '../../features/verification/screens/face_register_screen.dart';
 import '../../features/verification/screens/pre_ride_face_screen.dart';
 import '../../features/verification/screens/verification_status_screen.dart';
+import '../../features/ride/screens/passenger_home_screen.dart';
+import '../../features/ride/screens/active_ride_screen.dart';
 
 /// Route path constants — single source of truth for all navigation.
 /// Use these everywhere instead of raw strings like '/auth/phone'.
@@ -174,8 +176,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       // ── Passenger (Task 5) ────────────────────────────────────────────────
       GoRoute(
         path: AppRoutes.passengerHome,
-        builder: (context, state) =>
-            const _PlaceholderScreen('Passenger Home'),
+        builder: (context, state) => const PassengerHomeScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.activeRide,
+        builder: (context, state) => ActiveRideScreen(
+          rideId: state.pathParameters['rideId'] ?? '',
+        ),
       ),
 
       // ── Driver (Task 8) ───────────────────────────────────────────────────
