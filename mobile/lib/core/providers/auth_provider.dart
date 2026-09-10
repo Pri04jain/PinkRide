@@ -49,16 +49,19 @@ class AuthStateNotifier extends StateNotifier<AuthState> {
     }
 
     // Token exists — verify it's still valid by fetching the profile.
-    // If the token expired, _AuthInterceptor will try to refresh it.
-    // If refresh also fails, the 401 handler clears storage and we redirect.
+    // 8 second timeout — if the backend doesn't respond, treat as logged out
+    // rather than hanging on the splash screen forever.
     try {
-      final data = await _api.get(ApiEndpoints.profile);
-      final user = UserModel.fromJson(
-        data['profile'] as Map<String, dynamic>? ?? data,
+      final data = await _api.get(ApiEndpoints.profile).timeout(
+        const Duration(seconds: 8),
+        onTimeout: () => throw Exception('Session check timed out'),
       );
+      // Backend returns { profile: {...} } — ApiClient strips the success/data wrapper
+      final profileJson = data['profile'] as Map<String, dynamic>? ?? data;
+      final user = UserModel.fromJson(profileJson);
       state = AuthAuthenticated(user);
     } catch (_) {
-      // Token invalid or network error — treat as logged out
+      // Token invalid, network error, or timeout — treat as logged out
       await StorageService.clearAll();
       state = const AuthUnauthenticated();
     }
@@ -79,15 +82,20 @@ class AuthStateNotifier extends StateNotifier<AuthState> {
       refreshToken: refreshToken,
     );
 
-    final user = UserModel.fromJson(userJson);
-
-    // Save role to storage so cold-start redirect is instant (no API call)
-    await StorageService.saveUserMeta(
-      userId: user.id,
-      role: user.role.name,
-    );
-
-    state = AuthAuthenticated(user);
+    // The userJson from loginOrRegister may be a thin object (id, role, city only).
+    // Always fetch the full profile so we have phone, name, wallet_balance etc.
+    try {
+      final data = await _api.get(ApiEndpoints.profile);
+      final fullProfile = data['profile'] as Map<String, dynamic>? ?? data;
+      final user = UserModel.fromJson(fullProfile);
+      await StorageService.saveUserMeta(userId: user.id, role: user.role.name);
+      state = AuthAuthenticated(user);
+    } catch (_) {
+      // Profile fetch failed — build from the thin userJson as fallback
+      final user = UserModel.fromJson(userJson);
+      await StorageService.saveUserMeta(userId: user.id, role: user.role.name);
+      state = AuthAuthenticated(user);
+    }
   }
 
   // ── Update profile ────────────────────────────────────────────────────────

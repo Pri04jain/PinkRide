@@ -81,9 +81,13 @@ class UserModel {
   bool get isAdmin => role == UserRole.admin;
 
   /// Display name — full name if set, otherwise formatted phone number.
-  String get displayName => fullName?.isNotEmpty == true
-      ? fullName!
-      : '+91 ${phone.substring(phone.length - 10)}';
+  String get displayName {
+    if (fullName?.isNotEmpty == true) return fullName!;
+    if (phone.length >= 10) {
+      return '+91 ${phone.substring(phone.length - 10)}';
+    }
+    return phone.isNotEmpty ? phone : 'Passenger';
+  }
 
   static UserRole _parseRole(String? raw) {
     switch (raw) {
