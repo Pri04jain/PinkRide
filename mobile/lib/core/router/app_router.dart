@@ -14,6 +14,13 @@ import '../../features/verification/screens/pre_ride_face_screen.dart';
 import '../../features/verification/screens/verification_status_screen.dart';
 import '../../features/ride/screens/passenger_home_screen.dart';
 import '../../features/ride/screens/active_ride_screen.dart';
+import '../../features/safety/screens/emergency_contacts_screen.dart';
+import '../../features/payment/screens/payment_screen.dart';
+import '../../features/payment/screens/rating_screen.dart';
+import '../../features/payment/screens/wallet_screen.dart';
+import '../../features/admin/screens/driver_queue_screen.dart';
+import '../../features/admin/screens/driver_detail_screen.dart';
+import '../../features/admin/admin_service.dart';
 
 /// Route path constants — single source of truth for all navigation.
 /// Use these everywhere instead of raw strings like '/auth/phone'.
@@ -185,6 +192,35 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         ),
       ),
 
+      // ── Safety (Task 7) ───────────────────────────────────────────────────
+      GoRoute(
+        path: AppRoutes.emergencyContacts,
+        builder: (context, state) => const EmergencyContactsScreen(),
+      ),
+
+      // ── Payment (Task 9) ──────────────────────────────────────────────────
+      GoRoute(
+        path: AppRoutes.payment,
+        builder: (context, state) {
+          final extra = state.extra as Map<String, dynamic>? ?? {};
+          return PaymentScreen(
+            rideId: state.pathParameters['rideId'] ?? '',
+            paymentMethod: extra['paymentMethod'] as String? ?? 'cash',
+            amount: (extra['amount'] as num?)?.toDouble() ?? 0,
+          );
+        },
+      ),
+      GoRoute(
+        path: AppRoutes.rating,
+        builder: (context, state) => RatingScreen(
+          rideId: state.pathParameters['rideId'] ?? '',
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.wallet,
+        builder: (context, state) => const WalletScreen(),
+      ),
+
       // ── Driver (Task 8) ───────────────────────────────────────────────────
       GoRoute(
         path: AppRoutes.driverHome,
@@ -194,7 +230,17 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       // ── Admin (Task 10) ───────────────────────────────────────────────────
       GoRoute(
         path: AppRoutes.adminHome,
-        builder: (context, state) => const _PlaceholderScreen('Admin Home'),
+        builder: (context, state) => const DriverQueueScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.adminDriverDetail,
+        builder: (context, state) {
+          final driver = state.extra as DriverQueueItem?;
+          if (driver == null) {
+            return const _PlaceholderScreen('Driver Detail');
+          }
+          return DriverDetailScreen(driver: driver);
+        },
       ),
     ],
 
