@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PinkRide — Demo Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- ── Sidebar ── -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <h1>🌸 PinkRide</h1>
+    <span>Demo Dashboard</span>
+  </div>
+  <nav class="sidebar-nav">
+    <button class="nav-item active" data-page="dashboard">
+      <span class="icon">📊</span> Admin Dashboard
+    </button>
+    <button class="nav-item" data-page="demo">
+      <span class="icon">▶</span> Live API Demo
+    </button>
+    <button class="nav-item" data-page="arch">
+      <span class="icon">🏗</span> Architecture
+    </button>
+  </nav>
+  <div class="sidebar-footer">
+    PinkRide MVP · Jaipur<br>
+    Node.js + Supabase + Flutter
+  </div>
+</aside>
+
+<!-- ── Main ── -->
+<main class="main">
+
+  <!-- Topbar -->
+  <div class="topbar">
+    <div>
+      <h2 id="topbar-title">Admin Dashboard</h2>
+      <p id="topbar-sub">Manage drivers, view live stats</p>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center">
+      <span style="font-size:12px;color:#94a3b8">Backend: <strong style="color:#22c55e">localhost:3000</strong></span>
+      <button class="btn btn-outline btn-sm" id="admin-login-btn" onclick="openAdminLogin()">Admin Login</button>
+    </div>
+  </div>
+
+  <!-- ══ PAGE: DASHBOARD ══ -->
+  <div class="page active" id="page-dashboard">
+
+    <!-- Stats -->
+    <div class="stats-grid">
+      <div class="card stat-card">
+        <div class="card-title">Total Drivers</div>
+        <div class="card-value" id="stat-drivers">—</div>
+        <div class="card-sub" id="stats-note">Login as admin to see live stats</div>
+      </div>
+      <div class="card stat-card orange">
+        <div class="card-title">Pending Approvals</div>
+        <div class="card-value" id="stat-pending">—</div>
+        <div class="card-sub">Awaiting review</div>
+      </div>
+      <div class="card stat-card blue">
+        <div class="card-title">Total Rides</div>
+        <div class="card-value" id="stat-rides">—</div>
+        <div class="card-sub">All time</div>
+      </div>
+      <div class="card stat-card green">
+        <div class="card-title">Total Users</div>
+        <div class="card-value" id="stat-users">—</div>
+        <div class="card-sub">Passengers + Drivers</div>
+      </div>
+    </div>
+
+    <!-- Driver Queue -->
+    <div class="table-wrapper">
+      <div class="table-header">
+        <h3>Driver Approval Queue</h3>
+        <button class="btn btn-outline btn-sm" onclick="loadDriverQueue()">↻ Refresh</button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Driver</th>
+            <th>Vehicle</th>
+            <th>License No.</th>
+            <th>Status</th>
+            <th>Applied</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="driver-tbody">
+          <tr><td colspan="6">
+            <div class="empty">
+              <div class="emoji">🔐</div>
+              <h3>Admin login required</h3>
+              <p>Click "Admin Login" in the top right to authenticate</p>
+            </div>
+          </td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Feature overview cards -->
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:28px">
+      <div class="card" style="border-left:4px solid #e91e8c">
+        <div style="font-size:28px;margin-bottom:12px">🔐</div>
+        <h3 style="font-size:15px;font-weight:700;margin-bottom:6px">OTP Auth</h3>
+        <p style="font-size:13px;color:#64748b;line-height:1.5">Phone + 6-digit OTP login. JWT access (7d) + refresh (30d) tokens. Rate limited to 5 OTPs/hour per number.</p>
+      </div>
+      <div class="card" style="border-left:4px solid #3b82f6">
+        <div style="font-size:28px;margin-bottom:12px">🚗</div>
+        <h3 style="font-size:15px;font-weight:700;margin-bottom:6px">Smart Matching</h3>
+        <p style="font-size:13px;color:#64748b;line-height:1.5">Haversine distance matching. ±30min window, ≤3km pickup detour, women-only gender filter. Time-shift negotiation built in.</p>
+      </div>
+      <div class="card" style="border-left:4px solid #22c55e">
+        <div style="font-size:28px;margin-bottom:12px">🛡</div>
+        <h3 style="font-size:15px;font-weight:700;margin-bottom:6px">Safety First</h3>
+        <p style="font-size:13px;color:#64748b;line-height:1.5">Real-time route deviation detection. SOS → SMS emergency contacts. Face verification before boarding. 120s auto-alert timer.</p>
+      </div>
+      <div class="card" style="border-left:4px solid #f97316">
+        <div style="font-size:28px;margin-bottom:12px">💸</div>
+        <h3 style="font-size:15px;font-weight:700;margin-bottom:6px">Fare Splitting</h3>
+        <p style="font-size:13px;color:#64748b;line-height:1.5">Exclusive + shared segment pricing. ₹30 base + ₹12/km. 5% platform fee. Auto-split on shared rides. Min fare ₹50.</p>
+      </div>
+      <div class="card" style="border-left:4px solid #8b5cf6">
+        <div style="font-size:28px;margin-bottom:12px">📍</div>
+        <h3 style="font-size:15px;font-weight:700;margin-bottom:6px">Live Tracking</h3>
+        <p style="font-size:13px;color:#64748b;line-height:1.5">Socket.io location updates every 5s. Point-to-line Haversine deviation check. 500m threshold triggers passenger alert.</p>
+      </div>
+      <div class="card" style="border-left:4px solid #ec4899">
+        <div style="font-size:28px;margin-bottom:12px">⭐</div>
+        <h3 style="font-size:15px;font-weight:700;margin-bottom:6px">Ratings & Trust</h3>
+        <p style="font-size:13px;color:#64748b;line-height:1.5">Mutual rating after every trip. Tag-based feedback. Reliability score = avg rating − cancellation rate penalty.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ PAGE: LIVE DEMO ══ -->
+  <div class="page" id="page-demo">
+
+    <!-- Status pills showing ride flow -->
+    <div class="ride-status-flow" id="flow-pills">
+      <div class="status-pill" id="pill-0">1. OTP Login</div>
+      <div style="color:#94a3b8;font-size:18px;align-self:center">→</div>
+      <div class="status-pill" id="pill-1">2. Book Ride</div>
+      <div style="color:#94a3b8;font-size:18px;align-self:center">→</div>
+      <div class="status-pill" id="pill-2">3. Driver Accepts</div>
+      <div style="color:#94a3b8;font-size:18px;align-self:center">→</div>
+      <div class="status-pill" id="pill-3">4. Ride Confirmed</div>
+    </div>
+
+    <div class="demo-layout">
+      <!-- Step list -->
+      <div>
+        <div style="font-size:12px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px">Steps</div>
+        <div class="step-list" id="step-list"></div>
+      </div>
+
+      <!-- Panel -->
+      <div class="demo-panel" id="demo-panel"></div>
+    </div>
+  </div>
+
+  <!-- ══ PAGE: ARCHITECTURE ══ -->
+  <div class="page" id="page-arch">
+
+    <!-- Ride flow diagram -->
+    <div class="flow-diagram">
+      <h3>🔄 Complete Ride Flow</h3>
+      <div class="flow-steps">
+        <div class="flow-step">
+          <div class="flow-circle">📱</div>
+          <div class="flow-label">Passenger<br>Books Ride</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">
+          <div class="flow-circle">🔍</div>
+          <div class="flow-label">Matching<br>Engine</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">
+          <div class="flow-circle">🚗</div>
+          <div class="flow-label">Driver<br>Accepts</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">
+          <div class="flow-circle">🤳</div>
+          <div class="flow-label">Face<br>Verify</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">
+          <div class="flow-circle">🔑</div>
+          <div class="flow-label">OTP<br>Entry</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">
+          <div class="flow-circle">📍</div>
+          <div class="flow-label">Live<br>Tracking</div>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">
+          <div class="flow-circle">💳</div>
+          <div class="flow-label">Payment<br>+ Rating</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="arch-grid">
+      <!-- Tech Stack -->
+      <div class="arch-card">
+        <h3>🛠 Tech Stack</h3>
+
+        <div class="tech-item">
+          <div class="tech-icon">⚡</div>
+          <div>
+            <div class="tech-name">Node.js + Express</div>
+            <div class="tech-why">REST API backend. Lightweight, fast, great ecosystem for real-time apps. 59 endpoints across 9 modules.</div>
+          </div>
+        </div>
+
+        <div class="tech-item">
+          <div class="tech-icon">🗄</div>
+          <div>
+            <div class="tech-name">Supabase (PostgreSQL)</div>
+            <div class="tech-why">Managed Postgres with RLS, real-time subscriptions, and storage. Free tier covers MVP. No DevOps overhead.</div>
+          </div>
+        </div>
+
+        <div class="tech-item">
+          <div class="tech-icon">🔌</div>
+          <div>
+            <div class="tech-name">Socket.io</div>
+            <div class="tech-why">Real-time driver location updates every 5s, route deviation alerts, SOS broadcast — all via WebSocket rooms.</div>
+          </div>
+        </div>
+
+        <div class="tech-item">
+          <div class="tech-icon">📱</div>
+          <div>
+            <div class="tech-name">Flutter (planned)</div>
+            <div class="tech-why">Single codebase for Android + iOS. Dart is fast to write. Strong Google Maps integration.</div>
+          </div>
+        </div>
+
+        <div class="tech-item">
+          <div class="tech-icon">👁</div>
+          <div>
+            <div class="tech-name">AWS Rekognition</div>
+            <div class="tech-why">Face indexing + comparison for driver identity verification. Mock mode in dev — no AWS account needed to run locally.</div>
+          </div>
+        </div>
+
+        <div class="tech-item">
+          <div class="tech-icon">💳</div>
+          <div>
+            <div class="tech-name">Razorpay</div>
+            <div class="tech-why">UPI payment orders + HMAC signature verification. Mock mode when keys not set. Cash payment also supported.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Key Decisions -->
+      <div class="arch-card">
+        <h3>🧠 Key Architecture Decisions</h3>
+
+        <div class="tech-item">
+          <div class="tech-icon">📐</div>
+          <div>
+            <div class="tech-name">Haversine over PostGIS</div>
+            <div class="tech-why">PostGIS requires Docker + extensions. Haversine in pure JS gives the same distance accuracy for our scale. Easier to deploy, easier to debug.</div>
+          </div>
+        </div>
+
+        <div class="tech-item">
+          <div class="tech-icon">💾</div>
+          <div>
+            <div class="tech-name">In-memory OTP store (no Redis)</div>
+            <div class="tech-why">Redis adds ops complexity for MVP. A simple Node.js Map with TTL handles thousands of concurrent OTPs. Swap to Upstash Redis when scaling horizontally.</div>
+          </div>
+        </div>
+
+        <div class="tech-item">
+          <div class="tech-icon">🔒</div>
+          <div>
+            <div class="tech-name">DPDP Act 2025 compliance</div>
+            <div class="tech-why">Explicit consent before biometric capture. Only face embedding reference stored — never raw photos. Right-to-erasure endpoint deletes all face data on request.</div>
+          </div>
+        </div>
+
+        <div class="tech-item">
+          <div class="tech-icon">🛡</div>
+          <div>
+            <div class="tech-name">Atomic ride acceptance</div>
+            <div class="tech-why">Driver accept uses <code style="background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:11px">.is('driver_id', null)</code> filter — Supabase rejects the update if another driver already claimed it. No double-booking possible.</div>
+          </div>
+        </div>
+
+        <div class="tech-item">
+          <div class="tech-icon">⚖️</div>
+          <div>
+            <div class="tech-name">Cancellation fine system</div>
+            <div class="tech-why">Passenger: ₹50 deducted from wallet. Driver: ₹150 fine + reliability score penalty (-0.3). Discourages last-minute cancellations without being punitive for genuine emergencies.</div>
+          </div>
+        </div>
+
+        <div class="tech-item">
+          <div class="tech-icon">👩</div>
+          <div>
+            <div class="tech-name">Women-only safety design</div>
+            <div class="tech-why">Gender filter in matching engine. Male drivers allowed (hard to find female drivers in India). Driver photo verified via face recognition before every trip.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DB Schema summary -->
+    <div class="arch-card" style="margin-bottom:24px">
+      <h3 style="margin-bottom:20px">🗃 Database Schema (10 tables)</h3>
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px">
+        <div style="background:#fce4f3;border-radius:8px;padding:12px;text-align:center">
+          <div style="font-size:20px;margin-bottom:4px">👤</div>
+          <div style="font-size:13px;font-weight:700">users</div>
+          <div style="font-size:11px;color:#64748b">Passengers, drivers, admins</div>
+        </div>
+        <div style="background:#dbeafe;border-radius:8px;padding:12px;text-align:center">
+          <div style="font-size:20px;margin-bottom:4px">🚗</div>
+          <div style="font-size:13px;font-weight:700">drivers</div>
+          <div style="font-size:11px;color:#64748b">Extends users, vehicle + docs</div>
+        </div>
+        <div style="background:#dcfce7;border-radius:8px;padding:12px;text-align:center">
+          <div style="font-size:20px;margin-bottom:4px">🛣</div>
+          <div style="font-size:13px;font-weight:700">rides</div>
+          <div style="font-size:11px;color:#64748b">Core ride record + OTP</div>
+        </div>
+        <div style="background:#fef3c7;border-radius:8px;padding:12px;text-align:center">
+          <div style="font-size:20px;margin-bottom:4px">👥</div>
+          <div style="font-size:13px;font-weight:700">ride_passengers</div>
+          <div style="font-size:11px;color:#64748b">Per-passenger fare split</div>
+        </div>
+        <div style="background:#f3e8ff;border-radius:8px;padding:12px;text-align:center">
+          <div style="font-size:20px;margin-bottom:4px">📍</div>
+          <div style="font-size:13px;font-weight:700">route_deviations</div>
+          <div style="font-size:11px;color:#64748b">Safety deviation log</div>
+        </div>
+        <div style="background:#fce4f3;border-radius:8px;padding:12px;text-align:center">
+          <div style="font-size:20px;margin-bottom:4px">💸</div>
+          <div style="font-size:13px;font-weight:700">fines</div>
+          <div style="font-size:11px;color:#64748b">Cancellation penalties</div>
+        </div>
+        <div style="background:#dbeafe;border-radius:8px;padding:12px;text-align:center">
+          <div style="font-size:20px;margin-bottom:4px">⭐</div>
+          <div style="font-size:13px;font-weight:700">ratings</div>
+          <div style="font-size:11px;color:#64748b">Mutual post-ride rating</div>
+        </div>
+        <div style="background:#dcfce7;border-radius:8px;padding:12px;text-align:center">
+          <div style="font-size:20px;margin-bottom:4px">💰</div>
+          <div style="font-size:13px;font-weight:700">wallet_transactions</div>
+          <div style="font-size:11px;color:#64748b">Full money audit trail</div>
+        </div>
+        <div style="background:#fef3c7;border-radius:8px;padding:12px;text-align:center">
+          <div style="font-size:20px;margin-bottom:4px">📱</div>
+          <div style="font-size:13px;font-weight:700">device_tokens</div>
+          <div style="font-size:11px;color:#64748b">FCM push notification</div>
+        </div>
+        <div style="background:#f3e8ff;border-radius:8px;padding:12px;text-align:center">
+          <div style="font-size:20px;margin-bottom:4px">📋</div>
+          <div style="font-size:13px;font-weight:700">emergency_contacts</div>
+          <div style="font-size:11px;color:#64748b">SOS alert recipients</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- API surface -->
+    <div class="arch-card">
+      <h3 style="margin-bottom:16px">🔌 API Surface — 59 Endpoints</h3>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
+        <div>
+          <div style="font-size:12px;font-weight:700;color:#e91e8c;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Auth & Users</div>
+          <div style="font-size:13px;color:#475569;line-height:2">
+            POST /auth/request-otp<br>
+            POST /auth/verify-otp<br>
+            POST /auth/refresh-token<br>
+            POST /users/register<br>
+            GET/PATCH /users/profile<br>
+            POST /users/face-consent<br>
+            POST /users/wallet/topup<br>
+            DELETE /users/account
+          </div>
+        </div>
+        <div>
+          <div style="font-size:12px;font-weight:700;color:#3b82f6;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Rides & Drivers</div>
+          <div style="font-size:13px;color:#475569;line-height:2">
+            POST /rides/book<br>
+            GET /rides/fare-estimate<br>
+            GET /rides/active<br>
+            POST /rides/:id/cancel<br>
+            GET /drivers/ride-requests<br>
+            POST /drivers/ride-requests/:id/accept<br>
+            POST /rides/:id/otp/generate<br>
+            POST /rides/:id/otp/verify
+          </div>
+        </div>
+        <div>
+          <div style="font-size:12px;font-weight:700;color:#22c55e;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Safety & Payments</div>
+          <div style="font-size:13px;color:#475569;line-height:2">
+            POST /safety/sos/:rideId<br>
+            GET /tracking/:rideId/location<br>
+            POST /payments/rides/:id/upi/order<br>
+            POST /payments/rides/:id/cash/confirm<br>
+            GET /payments/wallet<br>
+            POST /payments/rides/:id/rate<br>
+            GET /payments/ratings/pending<br>
+            POST /verification/ride/:id
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- end arch page -->
+
+</main>
+
+<!-- ── Modals ── -->
+
+<!-- Admin Login -->
+<div class="modal-overlay" id="admin-login-modal">
+  <div class="modal">
+    <h3>🔐 Admin Login</h3>
+    <p>Enter your admin phone number to authenticate</p>
+    <div class="form-group">
+      <label>Phone Number</label>
+      <input type="text" id="admin-phone" placeholder="e.g. 9876543210" maxlength="10">
+    </div>
+    <div id="admin-otp-section" style="display:none">
+      <div class="form-group">
+        <label>OTP (check server terminal)</label>
+        <input type="text" id="admin-otp" placeholder="6-digit OTP" maxlength="6"
+          style="letter-spacing:6px;font-family:monospace;font-size:18px;text-align:center">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="document.getElementById('admin-login-modal').classList.remove('show')">Cancel</button>
+      <button class="btn btn-pink" id="admin-otp-btn" onclick="submitAdminLogin()">Send OTP</button>
+      <button class="btn btn-green" id="admin-verify-btn" style="display:none" onclick="verifyAdminOtp()">Verify & Login</button>
+    </div>
+  </div>
+</div>
+
+<!-- Reject Driver -->
+<div class="modal-overlay" id="reject-modal">
+  <div class="modal">
+    <h3>✗ Reject Application</h3>
+    <p>Rejecting <strong id="reject-driver-name"></strong>. A reason is required and will be shown to the driver.</p>
+    <input type="hidden" id="reject-driver-id">
+    <div class="form-group">
+      <label>Rejection Reason</label>
+      <textarea id="reject-reason" rows="3" placeholder="e.g. License document is unclear. Please re-upload a high-quality photo of your driving license."></textarea>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="document.getElementById('reject-modal').classList.remove('show')">Cancel</button>
+      <button class="btn btn-red" onclick="submitReject()">Confirm Rejection</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script src="js/app.js"></script>
+<script>
+  // Show OTP verify button after sending OTP
+  document.getElementById('admin-otp-btn').addEventListener('click', function() {
+    setTimeout(() => {
+      document.getElementById('admin-otp-section').style.display = 'block';
+      document.getElementById('admin-verify-btn').style.display = 'inline-flex';
+    }, 1000);
+  });
+</script>
+</body>
+</html>
