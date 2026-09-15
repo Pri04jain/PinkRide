@@ -9,8 +9,10 @@ const state = {
   adminToken:     null,
   activeToken:    null,
   rideId:         null,
+  ridePassengerId: null,
   otp:            null,
   currentStep:    0,
+  capturedImageBase64: null,
 };
 
 // ── Navigation ────────────────────────────────────────────────────────────────
@@ -257,6 +259,33 @@ const demoSteps = [
   },
   {
     id: 'step-3',
+    title: 'Complete Profile Registration',
+    desc: 'Enter name (consent auto-recorded during face verification)',
+    method: 'POST',
+    path: '/users/register',
+    body: () => ({ fullName: 'John Doe', gender: 'male', dateOfBirth: '1995-01-15', role: 'passenger' }),
+    run: stepCompleteRegistration,
+  },
+  {
+    id: 'step-4',
+    title: 'Face Verification - Validate Liveness',
+    desc: 'Take selfie, detect face, check liveness',
+    method: 'POST',
+    path: '/verification/register/validate',
+    body: () => ({ image: state.capturedImageBase64 || 'base64_placeholder' }),
+    run: stepFaceValidate,
+  },
+  {
+    id: 'step-5',
+    title: 'Face Verification - Confirm Registration',
+    desc: 'Index face into AWS Rekognition collection',
+    method: 'POST',
+    path: '/verification/register/confirm',
+    body: () => null,
+    run: stepFaceConfirm,
+  },
+  {
+    id: 'step-6',
     title: 'Get Fare Estimate',
     desc: 'Estimate fare before booking',
     method: 'GET',
@@ -265,7 +294,7 @@ const demoSteps = [
     run: stepFareEstimate,
   },
   {
-    id: 'step-4',
+    id: 'step-7',
     title: 'Book a Ride',
     desc: 'Passenger books a private ride',
     method: 'POST',
@@ -282,40 +311,22 @@ const demoSteps = [
     run: stepBookRide,
   },
   {
-    id: 'step-5',
+    id: 'step-8',
     title: 'Driver Goes Online',
-    desc: 'Driver sets availability to true',
+    desc: 'Driver sets location and goes available',
     method: 'PATCH',
     path: '/drivers/availability',
     body: () => ({ isAvailable: true }),
     run: stepDriverOnline,
   },
   {
-    id: 'step-6',
-    title: 'Driver Sees Requests',
-    desc: 'Driver fetches nearby ride requests',
-    method: 'GET',
-    path: '/drivers/ride-requests',
-    body: () => null,
-    run: stepDriverSeeRequests,
-  },
-  {
-    id: 'step-7',
+    id: 'step-9',
     title: 'Driver Accepts Ride',
-    desc: 'Driver accepts — passenger gets confirmed',
+    desc: 'Driver sees booking and accepts the ride',
     method: 'POST',
     path: '/drivers/ride-requests/:rideId/accept',
     body: () => null,
     run: stepDriverAccept,
-  },
-  {
-    id: 'step-8',
-    title: 'Passenger Active Ride',
-    desc: 'Passenger sees driver details + status',
-    method: 'GET',
-    path: '/rides/active',
-    body: () => null,
-    run: stepPassengerActive,
   },
 ];
 
@@ -376,8 +387,33 @@ function renderDemoPanel(i) {
         oninput="this.value=this.value.replace(/\D/g,'')" value="${document.getElementById('passenger-phone-input')?.value || ''}">
     </div>` : '');
 
-  // Special driver login section for step 5
-  const driverLoginSection = i === 4 ? `
+  // Special camera section for face verification steps
+  const cameraSection = (i === 4 || i === 11) ? `
+    <div class="request-body" style="border:2px dashed #e91e8c;padding:16px;border-radius:8px;background:#fce4f3">
+      <label style="color:#e91e8c;font-weight:700">📷 Camera Capture</label>
+      <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px">
+        <video id="camera-feed-${i}" width="280" height="280" 
+          style="border-radius:8px;background:#000;display:none;border:2px solid #e91e8c;autoplay;playsinline" autoplay playsinline></video>
+        <canvas id="camera-canvas-${i}" width="280" height="280" 
+          style="border-radius:8px;background:#f1f5f9;display:none;border:2px solid #22c55e"></canvas>
+        <img id="captured-photo-${i}" 
+          style="border-radius:8px;max-height:280px;display:none;border:2px solid #22c55e">
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" id="start-camera-${i}" 
+            onclick="startCamera(${i})">🎥 Open Camera</button>
+          <button class="btn btn-pink btn-sm" id="capture-btn-${i}" 
+            onclick="capturePhoto(${i})" style="display:none">📸 Capture</button>
+          <button class="btn btn-outline btn-sm" id="retake-btn-${i}" 
+            onclick="retakePhoto(${i})" style="display:none">🔄 Retake</button>
+        </div>
+        <small style="color:#64748b;font-size:12px">
+          ${i === 4 ? '✓ Face toward camera • Eyes open • Good lighting' : '✓ Verify your identity before boarding'}
+        </small>
+      </div>
+    </div>` : '';
+
+  // Special driver login section for step 8 (Driver Goes Online)
+  const driverLoginSection = (i === 7 || i === 8) ? `
     <div class="request-body">
       <label>Driver Setup</label>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -400,6 +436,7 @@ function renderDemoPanel(i) {
       </div>
       ${phoneInput}
       ${otpInput}
+      ${cameraSection}
       ${driverLoginSection}
       ${bodySection}
       <button class="run-btn" id="run-btn-${i}" onclick="runStep(${i})">
@@ -464,6 +501,18 @@ async function stepVerifyPassengerOtp() {
   return res;
 }
 
+async function stepCompleteRegistration() {
+  if (!state.passengerToken) return { success: false, message: 'Complete step 2 (passenger login) first' };
+  const res = await apiCall('POST', '/users/register', 
+    { fullName: 'John Doe', gender: 'male', dateOfBirth: '1995-01-15', role: 'passenger' },
+    state.passengerToken);
+  if (res.success) {
+    console.log('[Profile] Response:', res.data);
+    toast('Profile completed ✓');
+  }
+  return res;
+}
+
 async function stepFareEstimate() {
   return await apiCall('GET', '/rides/fare-estimate?distanceKm=8&rideType=private', null, state.passengerToken);
 }
@@ -481,6 +530,8 @@ async function stepBookRide() {
   }, state.passengerToken);
   if (res.success) {
     state.rideId = res.data?.rideId;
+    // Also capture ridePassengerId for pre-ride face verification
+    state.ridePassengerId = res.data?.ridePassengerId || res.data?.ride_passengers?.[0]?.id;
     toast(`Ride booked — ID: ${state.rideId?.slice(0,8)}...`);
   }
   return res;
@@ -497,13 +548,20 @@ async function driverLogin() {
   const phone = document.getElementById('driver-phone-input').value.trim();
   const otp   = document.getElementById('driver-otp-input').value.trim();
   if (!otp) return toast('Enter driver OTP', 'error');
-  const res = await apiCall('POST', '/auth/verify-otp', { phone, otp });
+  const res = await apiCall('POST', '/auth/verify-otp', { phone, otp, loginAsDriver: true });
   if (res.success) {
     state.driverToken = res.data?.tokens?.accessToken;
     toast('Driver logged in ✓');
   } else {
     toast(res.message, 'error');
   }
+}
+
+async function stepDriverLogin() {
+  // This is handled by the driverLogin() function that's called from the form
+  // We just return an error if not logged in
+  if (!state.driverToken) return { success: false, message: 'Please use the login form above to authenticate as driver first' };
+  return { success: true, message: 'Driver authenticated' };
 }
 
 async function stepDriverOnline() {
@@ -519,8 +577,8 @@ async function stepDriverSeeRequests() {
 }
 
 async function stepDriverAccept() {
-  if (!state.driverToken) return { success: false, message: 'Complete step 5 first' };
-  if (!state.rideId)      return { success: false, message: 'Complete step 4 (book ride) first' };
+  if (!state.driverToken) return { success: false, message: 'Login as driver using the form above first' };
+  if (!state.rideId)      return { success: false, message: 'Complete step 7 (book ride) first' };
   const res = await apiCall('POST', `/drivers/ride-requests/${state.rideId}/accept`, {}, state.driverToken);
   if (res.success) toast('Ride accepted — passenger notified via Socket.io ✓');
   return res;
@@ -529,6 +587,117 @@ async function stepDriverAccept() {
 async function stepPassengerActive() {
   if (!state.passengerToken) return { success: false, message: 'Complete step 2 first' };
   return await apiCall('GET', '/rides/active', null, state.passengerToken);
+}
+
+// ── Camera & Face Verification ───────────────────────────────────────────────
+
+let cameraStream = null;
+
+async function startCamera(stepIndex) {
+  try {
+    const canvas = document.getElementById(`camera-canvas-${stepIndex}`);
+    const video = document.getElementById(`camera-feed-${stepIndex}`);
+    const startBtn = document.getElementById(`start-camera-${stepIndex}`);
+    const captureBtn = document.getElementById(`capture-btn-${stepIndex}`);
+    
+    // Request camera access
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }
+    });
+    
+    video.srcObject = cameraStream;
+    video.style.display = 'block';
+    startBtn.style.display = 'none';
+    captureBtn.style.display = 'inline-flex';
+    
+    toast('Camera ready. Click Capture when ready.');
+  } catch (err) {
+    toast('Camera access denied: ' + err.message, 'error');
+  }
+}
+
+function capturePhoto(stepIndex) {
+  const video = document.getElementById(`camera-feed-${stepIndex}`);
+  const canvas = document.getElementById(`camera-canvas-${stepIndex}`);
+  const img = document.getElementById(`captured-photo-${stepIndex}`);
+  const captureBtn = document.getElementById(`capture-btn-${stepIndex}`);
+  const retakeBtn = document.getElementById(`retake-btn-${stepIndex}`);
+  
+  // Draw video frame to canvas
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  
+  // Convert to base64
+  const imageData = canvas.toDataURL('image/jpeg', 0.9);
+  state.capturedImageBase64 = imageData.split(',')[1]; // Remove data:image/jpeg;base64, prefix
+  
+  // Show preview
+  img.src = imageData;
+  img.style.display = 'block';
+  video.style.display = 'none';
+  canvas.style.display = 'none';
+  captureBtn.style.display = 'none';
+  retakeBtn.style.display = 'inline-flex';
+  
+  // Stop camera
+  if (cameraStream) {
+    cameraStream.getTracks().forEach(track => track.stop());
+    cameraStream = null;
+  }
+  
+  toast('Photo captured ✓');
+}
+
+function retakePhoto(stepIndex) {
+  const video = document.getElementById(`camera-feed-${stepIndex}`);
+  const img = document.getElementById(`captured-photo-${stepIndex}`);
+  const captureBtn = document.getElementById(`capture-btn-${stepIndex}`);
+  const retakeBtn = document.getElementById(`retake-btn-${stepIndex}`);
+  
+  img.style.display = 'none';
+  video.style.display = 'block';
+  captureBtn.style.display = 'inline-flex';
+  retakeBtn.style.display = 'none';
+  
+  startCamera(stepIndex);
+}
+
+async function stepFaceValidate() {
+  if (!state.passengerToken) return { success: false, message: 'Complete step 2 (passenger login) first' };
+  if (!state.capturedImageBase64) return { success: false, message: 'Capture a photo first using the camera' };
+  
+  const res = await apiCall('POST', '/verification/register/validate', 
+    { image: state.capturedImageBase64 }, state.passengerToken);
+  
+  if (res.success) toast('Face validated ✓ — liveness check passed');
+  return res;
+}
+
+async function stepFaceConfirm() {
+  if (!state.passengerToken) return { success: false, message: 'Complete step 2 first' };
+  
+  const res = await apiCall('POST', '/verification/register/confirm', {}, state.passengerToken);
+  
+  if (res.success) {
+    toast('Face registered ✓ — indexed into Rekognition');
+    state.capturedImageBase64 = null; // Clear for next use
+  }
+  return res;
+}
+
+async function stepPreRideFaceVerify() {
+  if (!state.passengerToken) return { success: false, message: 'Complete step 2 first' };
+  if (!state.ridePassengerId) return { success: false, message: 'Complete step 9 (driver accept) first' };
+  if (!state.capturedImageBase64) return { success: false, message: 'Capture a new photo using the camera' };
+  
+  const res = await apiCall('POST', `/verification/ride/${state.ridePassengerId}`, 
+    { image: state.capturedImageBase64 }, state.passengerToken);
+  
+  if (res.success) {
+    toast(`Identity verified ✓ — similarity ${res.data?.similarity?.toFixed(1)}%`);
+    state.capturedImageBase64 = null;
+  }
+  return res;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

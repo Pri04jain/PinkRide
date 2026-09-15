@@ -555,3 +555,22 @@ pre.code {
   color: white;
   border-color: var(--green);
 }
+
+
+/* ── Camera & Face Verification ── */
+#camera-feed-0, #camera-feed-2, #camera-feed-9,
+#camera-canvas-0, #camera-canvas-2, #camera-canvas-9,
+#captured-photo-0, #captured-photo-2, #captured-photo-9 {
+  max-width: 100%;
+  height: auto;
+  object-fit: cover;
+}
+
+video {
+  transform: scaleX(-1); /* Mirror effect */
+}
+
+.request-body {
+  margin-top: 16px;
+  padding-bottom: 16px;
+}

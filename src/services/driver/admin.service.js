@@ -5,8 +5,7 @@ const { notify } = require('../notification/fcm.service');
 // ─── Approval Queue ───────────────────────────────────────────────────────────
 
 const getDriverQueue = async ({ status = 'under_review', page = 1, limit = 20 } = {}) => {
-  // O4: single join query — was N+1 (1 drivers query + 1 users query per driver).
-  // Now always 1 roundtrip regardless of page size.
+  // Fetch drivers first (join via !inner crashes on some Supabase JS versions)
   let query = supabase
     .from('drivers')
     .select(`
@@ -16,8 +15,7 @@ const getDriverQueue = async ({ status = 'under_review', page = 1, limit = 20 } 
       vehicle_color, vehicle_year,
       approval_status, rejection_reason,
       license_doc_url, vehicle_rc_url, vehicle_insurance_url,
-      created_at, updated_at,
-      users!inner(full_name, phone, face_verified, gender)
+      created_at, updated_at
     `, { count: 'exact' })
     .order('created_at', { ascending: true })
     .range((page - 1) * limit, page * limit - 1);
@@ -26,11 +24,31 @@ const getDriverQueue = async ({ status = 'under_review', page = 1, limit = 20 } 
     query = query.eq('approval_status', status);
   }
 
-  const { data, error, count } = await query;
+  const { data: drivers, error, count } = await query;
   if (error) throw new AppError('Failed to fetch driver queue.', 500);
 
+  if (!drivers || drivers.length === 0) {
+    return {
+      drivers: [],
+      pagination: { page, limit, total: 0, pages: 0 },
+    };
+  }
+
+  // Fetch user details for all drivers in one query
+  const userIds = drivers.map(d => d.user_id);
+  const { data: users, error: usersError } = await supabase
+    .from('users')
+    .select('id, full_name, phone, face_verified, gender')
+    .in('id', userIds);
+
+  if (usersError) throw new AppError('Failed to fetch driver user details.', 500);
+
+  // Merge user data into driver records
+  const userMap = Object.fromEntries((users || []).map(u => [u.id, u]));
+  const merged = drivers.map(d => ({ ...d, users: userMap[d.user_id] || null }));
+
   return {
-    drivers: data || [],
+    drivers: merged,
     pagination: {
       page, limit,
       total: count || 0,
@@ -44,15 +62,19 @@ const getDriverQueue = async ({ status = 'under_review', page = 1, limit = 20 } 
 const getDriverDetail = async (driverId) => {
   const { data, error } = await supabase
     .from('drivers')
-    .select(`
-      *,
-      users!inner(full_name, phone, face_verified, gender, reliability_score, created_at)
-    `)
+    .select('*')
     .eq('id', driverId)
     .single();
 
   if (error || !data) throw new AppError('Driver not found.', 404);
-  return data;
+
+  const { data: user } = await supabase
+    .from('users')
+    .select('full_name, phone, face_verified, gender, reliability_score, created_at')
+    .eq('id', data.user_id)
+    .single();
+
+  return { ...data, users: user || null };
 };
 
 // ─── Approve Driver ───────────────────────────────────────────────────────────

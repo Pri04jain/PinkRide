@@ -29,8 +29,8 @@ const drivers = [
     // Check if driver profile exists
     const { data: dp } = await sb.from('drivers').select('id').eq('user_id', uid).maybeSingle();
     if (dp) {
-      await sb.from('drivers').update({ approval_status:'under_review' }).eq('id', dp.id);
-      console.log('Updated to under_review:', d.name);
+      await sb.from('drivers').update({ approval_status:'approved' }).eq('id', dp.id);
+      console.log('Updated to approved:', d.name);
     } else {
       const { error } = await sb.from('drivers').insert({
         user_id: uid, license_number: d.license, license_expiry:'2031-01-01',
@@ -39,12 +39,31 @@ const drivers = [
         vehicle_make: d.make, vehicle_model: d.model,
         vehicle_color: d.color, vehicle_year: d.year,
         vehicle_rc_url:'https://picsum.photos/400/300',
-        approval_status:'under_review',
+        approval_status:'approved',
       });
       if (error) console.log('driver error:', error.message);
       else console.log('Created under_review driver:', d.name);
     }
   }
-  console.log('\nDone! Run: node demo/server.js and refresh the dashboard.');
+  // ── Seed admin user ──────────────────────────────────────────────────────
+  const adminPhone = '9000000000';
+  const { data: existingAdmin } = await sb.from('users').select('id').eq('phone', adminPhone).maybeSingle();
+  if (existingAdmin) {
+    await sb.from('users').update({ role: 'admin', full_name: 'PinkRide Admin', is_active: true }).eq('id', existingAdmin.id);
+    console.log('Updated existing admin user');
+  } else {
+    const { error } = await sb.from('users').insert({
+      phone: adminPhone, country_code: '+91', role: 'admin',
+      full_name: 'PinkRide Admin', is_active: true, is_phone_verified: true, city: 'Jaipur'
+    });
+    if (error) console.log('Admin seed error:', error.message);
+    else console.log('Created admin user: 9000000000');
+  }
+
+  console.log('\nDemo credentials:');
+  console.log('  Passenger : any new phone number');
+  console.log('  Drivers   : 9811122233 / 9822233344 / 9833344455  (all approved)');
+  console.log('  Admin     : 9000000000');
+  console.log('\nRun: node demo/server.js and open http://localhost:8080');
   process.exit(0);
 })();

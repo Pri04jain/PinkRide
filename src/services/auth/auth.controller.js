@@ -24,10 +24,10 @@ const verifyOtpAndLogin = async (req, res, next) => {
       return error(res, 'Validation failed', 422, errors.array());
     }
 
-    const { phone, otp, purpose = 'login' } = req.body;
+    const { phone, otp, purpose = 'login', loginAsDriver = false } = req.body;
 
     await authService.verifyOtp(phone, otp, purpose);
-    const result = await authService.loginOrRegister(phone);
+    const result = await authService.loginOrRegister(phone, loginAsDriver);
 
     return success(res, result, result.isNewUser ? 'Registration started' : 'Login successful');
   } catch (err) {

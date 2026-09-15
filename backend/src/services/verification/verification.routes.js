@@ -23,7 +23,7 @@ router.use(faceLimiter);
 router.get('/status', controller.getVerificationStatus);
 
 // POST /api/v1/verification/register/validate
-// Step 1: Submit selfie — validates liveness, returns session token
+// Step 4: Submit selfie — validates liveness, returns session token
 router.post(
   '/register/validate',
   [
@@ -37,7 +37,7 @@ router.post(
 );
 
 // POST /api/v1/verification/register/confirm
-// Step 2: Index validated face into Rekognition
+// Step 5: Index validated face into Rekognition
 router.post('/register/confirm', controller.confirmRegistration);
 
 // POST /api/v1/verification/ride/:ridePassengerId

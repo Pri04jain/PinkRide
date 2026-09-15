@@ -41,10 +41,10 @@ const recordConsent = async (userId) => {
 // ─── Registration Face Verification ──────────────────────────────────────────
 
 /**
- * Step 1 — Liveness check.
+ * Step 4 — Liveness check.
  * Decodes the base64 image, calls AWS Rekognition DetectFaces (or mock),
  * validates eyes open / no sunglasses / good pose & quality.
- * The raw image buffer is held in otpStore for 60 s until Step 2 confirms.
+ * The raw image buffer is held in otpStore for 60 s until Step 5 confirms.
  */
 const validateFaceForRegistration = async (userId, base64Image) => {
   const { data: user, error } = await supabase
@@ -81,7 +81,7 @@ const validateFaceForRegistration = async (userId, base64Image) => {
 };
 
 /**
- * Step 2 — Index the face into the Rekognition collection.
+ * Step 5 — Index the face into the Rekognition collection.
  * Stores only the faceId reference string — no raw photo persisted.
  */
 const confirmFaceRegistration = async (userId) => {
