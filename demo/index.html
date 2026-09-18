@@ -21,6 +21,9 @@
     <button class="nav-item active" data-page="dashboard">
       <span class="icon">📊</span> Admin Dashboard
     </button>
+    <button class="nav-item" data-page="sim">
+      <span class="icon">📱</span> Ride Simulation
+    </button>
     <button class="nav-item" data-page="demo">
       <span class="icon">▶</span> Live API Demo
     </button>
@@ -140,8 +143,71 @@
     </div>
   </div>
 
+  <!-- ══ PAGE: SIMULATION ══ -->
+  <div class="page" id="page-sim">
+
+    <div id="sim-auth-banner" class="sim-auth-banner"></div>
+
+    <!-- Narration bar -->
+    <div class="sim-narration-bar">
+      <span id="sim-narration">Loading simulation...</span>
+    </div>
+
+    <!-- Stage: two phones with connector -->
+    <div class="sim-stage">
+
+      <!-- Passenger phone -->
+      <div>
+        <div class="phone-shell">
+          <div class="phone-screen" id="sim-passenger-phone"></div>
+        </div>
+        <div class="phone-label">👤 Priya (Passenger)</div>
+      </div>
+
+      <!-- Middle connector -->
+      <div class="sim-connector">
+        <div class="sim-socket-badge">⚡ Socket.io<br>real-time events</div>
+        <div class="sim-arrow">⟷</div>
+        <div class="sim-api-log" id="sim-api-log">
+          POST /rides/book<br>
+          → 201 ride created<br>
+          → emit: ride_request<br>
+          POST /drivers/accept<br>
+          → emit: ride_accepted
+        </div>
+        <div class="sim-arrow">⟷</div>
+        <div class="sim-socket-badge">🗄 Supabase<br>PostgreSQL</div>
+      </div>
+
+      <!-- Driver phone -->
+      <div>
+        <div class="phone-shell">
+          <div class="phone-screen" id="sim-driver-phone"></div>
+        </div>
+        <div class="phone-label">🚗 Rahul (Driver)</div>
+      </div>
+
+    </div>
+
+    <!-- Restart button -->
+    <div style="display:flex;justify-content:flex-end;margin-top:8px">
+      <button onclick="restartSim()" style="background:none;border:1.5px solid #e2e8f0;border-radius:8px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;color:#64748b">↺ Restart Demo</button>
+    </div>
+
+  </div>
+
   <!-- ══ PAGE: LIVE DEMO ══ -->
   <div class="page" id="page-demo">
+
+    <!-- Token status + Reset -->
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap" id="token-status-bar">
+        <span style="background:#f1f5f9;color:#94a3b8;padding:3px 10px;border-radius:20px;font-size:12px">👤 Passenger —</span>
+        <span style="background:#f1f5f9;color:#94a3b8;padding:3px 10px;border-radius:20px;font-size:12px">🚗 Driver —</span>
+        <span style="background:#f1f5f9;color:#94a3b8;padding:3px 10px;border-radius:20px;font-size:12px">🛣 No ride yet</span>
+      </div>
+      <button class="btn btn-outline btn-sm" onclick="resetDemo()" style="color:#ef4444;border-color:#ef4444">↺ Reset Demo</button>
+    </div>
 
     <!-- Status pills showing ride flow -->
     <div class="ride-status-flow" id="flow-pills">
@@ -439,10 +505,15 @@
 <div class="modal-overlay" id="admin-login-modal">
   <div class="modal">
     <h3>🔐 Admin Login</h3>
-    <p>Enter your admin phone number to authenticate</p>
+    <p>Use one of the seeded admin accounts below</p>
+    <div style="background:#fce4f3;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px">
+      <strong>Demo admin phones:</strong><br>
+      <code style="font-size:14px;letter-spacing:2px">9000000000</code> &nbsp;or&nbsp;
+      <code style="font-size:14px;letter-spacing:2px">9000000001</code>
+    </div>
     <div class="form-group">
       <label>Phone Number</label>
-      <input type="text" id="admin-phone" placeholder="e.g. 9876543210" maxlength="10">
+      <input type="text" id="admin-phone" placeholder="9000000000" maxlength="10" value="9000000000">
     </div>
     <div id="admin-otp-section" style="display:none">
       <div class="form-group">
@@ -479,6 +550,7 @@
 <!-- Toast -->
 <div class="toast" id="toast"></div>
 
+<script src="js/simulation.js"></script>
 <script src="js/app.js"></script>
 <script>
   // Show OTP verify button after sending OTP

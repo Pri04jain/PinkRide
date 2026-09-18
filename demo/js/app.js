@@ -7,12 +7,11 @@ const state = {
   passengerToken: null,
   driverToken:    null,
   adminToken:     null,
-  activeToken:    null,
   rideId:         null,
   ridePassengerId: null,
-  otp:            null,
   currentStep:    0,
   capturedImageBase64: null,
+  passengerPhone: '9876543210',
 };
 
 // ── Navigation ────────────────────────────────────────────────────────────────
@@ -24,6 +23,7 @@ function navigate(page) {
 
   const titles = {
     dashboard: { title: 'Admin Dashboard', sub: 'Manage drivers, view live stats' },
+    sim:       { title: 'Ride Simulation', sub: 'See PinkRide from both sides — passenger & driver' },
     demo:      { title: 'Live API Demo', sub: 'Walk through the full ride flow step by step' },
     arch:      { title: 'Architecture', sub: 'Tech stack decisions and system design' },
   };
@@ -37,7 +37,33 @@ function toast(msg, type = 'success') {
   const el = document.getElementById('toast');
   el.textContent = (type === 'success' ? '✓ ' : '✗ ') + msg;
   el.className = `toast ${type} show`;
-  setTimeout(() => el.classList.remove('show'), 3000);
+  setTimeout(() => el.classList.remove('show'), 3500);
+}
+
+// ── Token Status Bar ──────────────────────────────────────────────────────────
+function updateTokenStatus() {
+  const bar = document.getElementById('token-status-bar');
+  if (!bar) return;
+  const pills = [
+    state.passengerToken ? `<span style="background:#dcfce7;color:#16a34a;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600">👤 Passenger ✓</span>` : `<span style="background:#f1f5f9;color:#94a3b8;padding:3px 10px;border-radius:20px;font-size:12px">👤 Passenger —</span>`,
+    state.driverToken   ? `<span style="background:#dcfce7;color:#16a34a;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600">🚗 Driver ✓</span>`    : `<span style="background:#f1f5f9;color:#94a3b8;padding:3px 10px;border-radius:20px;font-size:12px">🚗 Driver —</span>`,
+    state.rideId        ? `<span style="background:#dbeafe;color:#2563eb;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600">🛣 Ride ${state.rideId.slice(0,6)}…</span>` : `<span style="background:#f1f5f9;color:#94a3b8;padding:3px 10px;border-radius:20px;font-size:12px">🛣 No ride yet</span>`,
+  ];
+  bar.innerHTML = pills.join('');
+}
+
+// ── Reset Demo ────────────────────────────────────────────────────────────────
+function resetDemo() {
+  state.passengerToken = null;
+  state.driverToken    = null;
+  state.rideId         = null;
+  state.ridePassengerId = null;
+  state.capturedImageBase64 = null;
+  completedSteps = new Set();
+  updateTokenStatus();
+  renderDemoSteps();
+  selectStep(0);
+  toast('Demo reset — start from Step 1');
 }
 
 // ── API Helper ────────────────────────────────────────────────────────────────
@@ -45,16 +71,15 @@ async function apiCall(method, path, body = null, token = null) {
   const headers = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
   const opts = { method, headers };
-  if (body) opts.body = JSON.stringify(body);
+  if (body && Object.keys(body).length) opts.body = JSON.stringify(body);
   try {
     const res = await fetch(API + path, opts);
     return await res.json();
   } catch (e) {
-    return { success: false, message: 'Network error: ' + e.message };
+    return { success: false, message: 'Network error — is the backend running on port 3000? ' + e.message };
   }
 }
 
-// ── Format JSON for display ───────────────────────────────────────────────────
 function fmt(obj) {
   return JSON.stringify(obj, null, 2);
 }
@@ -225,12 +250,18 @@ async function verifyAdminOtp() {
   const res = await apiCall('POST', '/auth/verify-otp', { phone, otp });
   if (!res.success) return toast(res.message, 'error');
 
+  // Check the logged-in user actually has admin role
+  const role = res.data?.user?.role;
+  if (role && role !== 'admin') {
+    return toast(`Phone ${phone} has role "${role}", not admin. Use 9000000000 or 9000000001`, 'error');
+  }
+
   state.adminToken = res.data?.tokens?.accessToken;
   document.getElementById('admin-login-modal').classList.remove('show');
   document.getElementById('admin-login-btn').textContent = '✓ Admin';
   document.getElementById('admin-login-btn').classList.add('btn-green');
   document.getElementById('admin-login-btn').classList.remove('btn-outline');
-  toast('Admin logged in');
+  toast('Admin logged in ✓');
   await loadDashboard();
 }
 
@@ -272,16 +303,16 @@ const demoSteps = [
     desc: 'Take selfie, detect face, check liveness',
     method: 'POST',
     path: '/verification/register/validate',
-    body: () => ({ image: state.capturedImageBase64 || 'base64_placeholder' }),
+    body: () => ({ image: state.capturedImageBase64 ? '&lt;photo captured ✓&gt;' : '⚠ Take photo first' }),
     run: stepFaceValidate,
   },
   {
     id: 'step-5',
     title: 'Face Verification - Confirm Registration',
-    desc: 'Index face into AWS Rekognition collection',
+    desc: 'Index face into Rekognition (photo auto-sent from step 4)',
     method: 'POST',
     path: '/verification/register/confirm',
-    body: () => null,
+    body: () => ({ image: state.capturedImageBase64 ? '&lt;same photo as step 4&gt;' : '&lt;from server session&gt;' }),
     run: stepFaceConfirm,
   },
   {
@@ -357,6 +388,7 @@ function renderDemoPanel(i) {
   const panel = document.getElementById('demo-panel');
 
   const bodyJson = s.body();
+  // bodyJson may contain placeholder strings (not real objects), render as-is
   const bodySection = bodyJson ? `
     <div class="request-body">
       <label>Request Body</label>
@@ -388,7 +420,7 @@ function renderDemoPanel(i) {
     </div>` : '');
 
   // Special camera section for face verification steps
-  const cameraSection = (i === 4 || i === 11) ? `
+  const cameraSection = (i === 3 || i === 4 || i === 11) ? `
     <div class="request-body" style="border:2px dashed #e91e8c;padding:16px;border-radius:8px;background:#fce4f3">
       <label style="color:#e91e8c;font-weight:700">📷 Camera Capture</label>
       <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px">
@@ -407,7 +439,7 @@ function renderDemoPanel(i) {
             onclick="retakePhoto(${i})" style="display:none">🔄 Retake</button>
         </div>
         <small style="color:#64748b;font-size:12px">
-          ${i === 4 ? '✓ Face toward camera • Eyes open • Good lighting' : '✓ Verify your identity before boarding'}
+          ${i === 3 || i === 4 ? '✓ Face toward camera • Eyes open • Good lighting' : '✓ Verify your identity before boarding'}
         </small>
       </div>
     </div>` : '';
@@ -470,6 +502,7 @@ async function runStep(i) {
     if (result.success) {
       completedSteps.add(i);
       renderDemoSteps();
+      updateTokenStatus();
     }
   } catch(e) {
     box.className = 'response-box error';
@@ -484,41 +517,47 @@ async function runStep(i) {
 
 async function stepRequestPassengerOtp() {
   const phone = document.getElementById('passenger-phone-input')?.value?.trim() || '9876543210';
+  state.passengerPhone = phone;
   const res = await apiCall('POST', '/auth/request-otp', { phone });
   if (res.success) toast('OTP sent — check server terminal for code');
+  else toast(res.message, 'error');
   return res;
 }
 
 async function stepVerifyPassengerOtp() {
-  const phone = document.getElementById('passenger-phone-input')?.value?.trim() || '9876543210';
+  const phone = document.getElementById('passenger-phone-input')?.value?.trim() || state.passengerPhone || '9876543210';
   const otp = document.getElementById('demo-otp-input')?.value?.trim();
   if (!otp || otp.length !== 6) return { success: false, message: 'Enter the 6-digit OTP from the server terminal first' };
   const res = await apiCall('POST', '/auth/verify-otp', { phone, otp });
   if (res.success) {
     state.passengerToken = res.data?.tokens?.accessToken;
+    updateTokenStatus();
     toast('Passenger logged in ✓');
   }
   return res;
 }
 
 async function stepCompleteRegistration() {
-  if (!state.passengerToken) return { success: false, message: 'Complete step 2 (passenger login) first' };
-  const res = await apiCall('POST', '/users/register', 
-    { fullName: 'John Doe', gender: 'male', dateOfBirth: '1995-01-15', role: 'passenger' },
+  if (!state.passengerToken) return { success: false, message: 'Complete Step 2 (login) first' };
+  const res = await apiCall('POST', '/users/register',
+    { fullName: 'Demo Passenger', gender: 'female', dateOfBirth: '1995-01-15', role: 'passenger' },
     state.passengerToken);
-  if (res.success) {
-    console.log('[Profile] Response:', res.data);
-    toast('Profile completed ✓');
+  if (res.success) toast('Profile set ✓');
+  // 400/409 here just means profile already exists — not fatal, continue
+  else if (res.message?.toLowerCase().includes('already')) {
+    toast('Profile already set — continuing', 'success');
+    return { success: true, message: 'Profile already registered, continuing', data: res.data };
   }
   return res;
 }
 
 async function stepFareEstimate() {
+  if (!state.passengerToken) return { success: false, message: 'Complete Step 2 (login) first' };
   return await apiCall('GET', '/rides/fare-estimate?distanceKm=8&rideType=private', null, state.passengerToken);
 }
 
 async function stepBookRide() {
-  if (!state.passengerToken) return { success: false, message: 'Complete step 2 (passenger login) first' };
+  if (!state.passengerToken) return { success: false, message: 'Complete Step 2 (login) first' };
   const res = await apiCall('POST', '/rides/book', {
     rideType: 'private',
     pickupLat: 26.9124, pickupLng: 75.7873,
@@ -530,62 +569,53 @@ async function stepBookRide() {
   }, state.passengerToken);
   if (res.success) {
     state.rideId = res.data?.rideId;
-    // Also capture ridePassengerId for pre-ride face verification
     state.ridePassengerId = res.data?.ridePassengerId || res.data?.ride_passengers?.[0]?.id;
-    toast(`Ride booked — ID: ${state.rideId?.slice(0,8)}...`);
+    updateTokenStatus();
+    toast(`Ride booked — ID: ${state.rideId?.slice(0,8)}…`);
   }
   return res;
 }
 
 async function driverGetOtp() {
-  const phone = document.getElementById('driver-phone-input').value.trim();
+  const phone = document.getElementById('driver-phone-input')?.value?.trim() || '9111111111';
   const res = await apiCall('POST', '/auth/request-otp', { phone });
   if (res.success) toast('Driver OTP sent — check server terminal');
   else toast(res.message, 'error');
 }
 
 async function driverLogin() {
-  const phone = document.getElementById('driver-phone-input').value.trim();
-  const otp   = document.getElementById('driver-otp-input').value.trim();
-  if (!otp) return toast('Enter driver OTP', 'error');
-  const res = await apiCall('POST', '/auth/verify-otp', { phone, otp, loginAsDriver: true });
+  const phone = document.getElementById('driver-phone-input')?.value?.trim() || '9111111111';
+  const otp   = document.getElementById('driver-otp-input')?.value?.trim();
+  if (!otp) return toast('Enter driver OTP first', 'error');
+  const res = await apiCall('POST', '/auth/verify-otp', { phone, otp });
   if (res.success) {
     state.driverToken = res.data?.tokens?.accessToken;
+    updateTokenStatus();
     toast('Driver logged in ✓');
   } else {
     toast(res.message, 'error');
   }
 }
 
-async function stepDriverLogin() {
-  // This is handled by the driverLogin() function that's called from the form
-  // We just return an error if not logged in
-  if (!state.driverToken) return { success: false, message: 'Please use the login form above to authenticate as driver first' };
-  return { success: true, message: 'Driver authenticated' };
-}
-
 async function stepDriverOnline() {
-  if (!state.driverToken) return { success: false, message: 'Login as driver first using the form above, then click Run' };
-  // Also update location so Haversine filter works
+  if (!state.driverToken) return { success: false, message: 'Log in as driver using the form above first, then click Run' };
+  // Update location so Haversine radius filter finds the ride
   await apiCall('PATCH', '/drivers/location', { lat: 26.9124, lng: 75.7873 }, state.driverToken);
-  return await apiCall('PATCH', '/drivers/availability', { isAvailable: true }, state.driverToken);
-}
-
-async function stepDriverSeeRequests() {
-  if (!state.driverToken) return { success: false, message: 'Complete step 5 (driver login) first' };
-  return await apiCall('GET', '/drivers/ride-requests', null, state.driverToken);
+  const res = await apiCall('PATCH', '/drivers/availability', { isAvailable: true }, state.driverToken);
+  if (res.success) toast('Driver online ✓ — location set to Vaishali Nagar');
+  return res;
 }
 
 async function stepDriverAccept() {
-  if (!state.driverToken) return { success: false, message: 'Login as driver using the form above first' };
-  if (!state.rideId)      return { success: false, message: 'Complete step 7 (book ride) first' };
+  if (!state.driverToken) return { success: false, message: 'Complete Step 8 (driver online) first' };
+  if (!state.rideId)      return { success: false, message: 'Complete Step 7 (book ride) first' };
   const res = await apiCall('POST', `/drivers/ride-requests/${state.rideId}/accept`, {}, state.driverToken);
-  if (res.success) toast('Ride accepted — passenger notified via Socket.io ✓');
+  if (res.success) toast('Ride accepted ✓ — Socket.io event emitted to passenger');
   return res;
 }
 
 async function stepPassengerActive() {
-  if (!state.passengerToken) return { success: false, message: 'Complete step 2 first' };
+  if (!state.passengerToken) return { success: false, message: 'Complete Step 2 first' };
   return await apiCall('GET', '/rides/active', null, state.passengerToken);
 }
 
@@ -663,24 +693,27 @@ function retakePhoto(stepIndex) {
 }
 
 async function stepFaceValidate() {
-  if (!state.passengerToken) return { success: false, message: 'Complete step 2 (passenger login) first' };
-  if (!state.capturedImageBase64) return { success: false, message: 'Capture a photo first using the camera' };
-  
-  const res = await apiCall('POST', '/verification/register/validate', 
+  if (!state.passengerToken) return { success: false, message: 'Complete Step 2 (login) first' };
+  if (!state.capturedImageBase64) return { success: false, message: '📷 Open the camera above, take a selfie, then click Run' };
+
+  const res = await apiCall('POST', '/verification/register/validate',
     { image: state.capturedImageBase64 }, state.passengerToken);
-  
-  if (res.success) toast('Face validated ✓ — liveness check passed');
+
+  if (res.success) toast('Face validated ✓ — proceed to Step 5 to confirm');
+  // Do NOT clear capturedImageBase64 here — Step 5 needs it
   return res;
 }
 
 async function stepFaceConfirm() {
-  if (!state.passengerToken) return { success: false, message: 'Complete step 2 first' };
-  
-  const res = await apiCall('POST', '/verification/register/confirm', {}, state.passengerToken);
-  
+  if (!state.passengerToken) return { success: false, message: 'Complete Step 2 (login) first' };
+  if (!state.capturedImageBase64) return { success: false, message: 'Complete Step 4 (validate) first — photo is required' };
+
+  const body = { image: state.capturedImageBase64 };
+  const res = await apiCall('POST', '/verification/register/confirm', body, state.passengerToken);
+
   if (res.success) {
-    toast('Face registered ✓ — indexed into Rekognition');
-    state.capturedImageBase64 = null; // Clear for next use
+    toast('Face registered ✓');
+    state.capturedImageBase64 = null; // safe to clear now — Step 5 is done
   }
   return res;
 }
@@ -709,13 +742,32 @@ document.addEventListener('DOMContentLoaded', () => {
   loadDashboard();
   renderDemoSteps();
   selectStep(0);
+  updateTokenStatus();
 
   // Nav clicks
   document.querySelectorAll('.nav-item[data-page]').forEach(el => {
     el.addEventListener('click', () => {
       const page = el.dataset.page;
       navigate(page);
-      if (page === 'dashboard') loadDashboard();
+      if (page === 'dashboard') {
+        loadDashboard();
+        // If sim has a pending driver approval, prompt admin login and refresh queue
+        if (typeof S !== 'undefined' && S.approvalPolling) {
+          setTimeout(() => {
+            const note = document.getElementById('sim-admin-hint');
+            if (!note) {
+              const hint = document.createElement('div');
+              hint.id = 'sim-admin-hint';
+              hint.style.cssText = 'background:#fce4f3;border:1.5px solid var(--pink);border-radius:10px;padding:12px 18px;margin-bottom:16px;font-size:13px;font-weight:600;color:var(--pink-dark);display:flex;align-items:center;gap:10px';
+              hint.innerHTML = '🔔 <span>Driver application pending from simulation — login as admin and approve from the queue below</span>';
+              const page = document.getElementById('page-dashboard');
+              if (page) page.insertBefore(hint, page.firstChild);
+            }
+          }, 100);
+        }
+      }
+      if (page === 'sim') initSimulation();
+      if (page === 'demo') updateTokenStatus();
     });
   });
 });
