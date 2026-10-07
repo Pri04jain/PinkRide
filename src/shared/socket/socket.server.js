@@ -53,7 +53,8 @@ const initSocket = (httpServer) => {
     console.log(`[Socket] Connected: ${userId} (${role}) — ${socket.id}`);
 
     // Both passenger and driver join the ride room by rideId
-    socket.on('join_ride', async ({ rideId }) => {
+    // Flutter emits 'join_ride_room' — accept both names for compatibility
+    const _handleJoinRide = async ({ rideId }) => {
       if (!rideId) return;
 
       const allowed = await _isUserInRide(userId, role, rideId);
@@ -66,7 +67,10 @@ const initSocket = (httpServer) => {
       socket.currentRideId = rideId;
       socket.emit('joined_ride', { rideId });
       console.log(`[Socket] ${userId} joined ride:${rideId}`);
-    });
+    };
+
+    socket.on('join_ride', _handleJoinRide);
+    socket.on('join_ride_room', _handleJoinRide); // Flutter alias
 
     // Driver sends live location — broadcast to all passengers in room
     socket.on('driver_location', ({ rideId, lat, lng, heading, speedKmh }) => {
@@ -81,7 +85,8 @@ const initSocket = (httpServer) => {
       };
 
       // Broadcast to everyone in the ride room except the sender
-      socket.to(`ride:${rideId}`).emit('driver_location_update', payload);
+      // Flutter listens for 'driver_location' (not 'driver_location_update')
+      socket.to(`ride:${rideId}`).emit('driver_location', payload);
 
       // Run deviation detection asynchronously — errors are logged, never thrown
       trackingService.processLocationUpdate(userId, rideId, lat, lng)

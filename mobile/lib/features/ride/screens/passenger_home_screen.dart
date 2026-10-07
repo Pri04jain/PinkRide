@@ -117,7 +117,9 @@ class _PassengerHomeScreenState extends ConsumerState<PassengerHomeScreen> {
     });
 
     ref.listen<ActiveRideState>(activeRideProvider, (_, next) {
-      if (next is ActiveRideLoaded && !next.ride.isCompleted) {
+      if (next is ActiveRideLoaded &&
+          !next.ride.isCompleted &&
+          next.ride.id.isNotEmpty) {
         final location = GoRouterState.of(context).matchedLocation;
         if (location == AppRoutes.passengerHome) {
           context.push(
@@ -231,12 +233,15 @@ class _PassengerHomeScreenState extends ConsumerState<PassengerHomeScreen> {
                             const Icon(Icons.wb_sunny_outlined,
                                 size: 18, color: AppTheme.primary),
                             const SizedBox(width: 8),
-                            Text(
-                              'Hi, ${user?.displayName ?? 'there'} 👋',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w600,
-                                fontSize: 14,
-                                color: AppTheme.textPrimary,
+                            Expanded(
+                              child: Text(
+                                'Hi, ${user?.displayName ?? 'there'} 👋',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 14,
+                                  color: AppTheme.textPrimary,
+                                ),
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
                           ],
@@ -245,6 +250,55 @@ class _PassengerHomeScreenState extends ConsumerState<PassengerHomeScreen> {
                     ),
                     const SizedBox(width: 8),
                     _WalletBadge(balance: user?.walletBalance ?? 0),
+                    const SizedBox(width: 8),
+                    // Logout button
+                    GestureDetector(
+                      onTap: () async {
+                        final confirm = await showDialog<bool>(
+                          context: context,
+                          builder: (ctx) => AlertDialog(
+                            title: const Text('Log out?'),
+                            content: const Text(
+                                'You\'ll need to log in again to book rides.'),
+                            actions: [
+                              TextButton(
+                                onPressed: () =>
+                                    Navigator.pop(ctx, false),
+                                child: const Text('Cancel'),
+                              ),
+                              TextButton(
+                                onPressed: () =>
+                                    Navigator.pop(ctx, true),
+                                child: const Text('Log out',
+                                    style: TextStyle(
+                                        color: AppTheme.error)),
+                              ),
+                            ],
+                          ),
+                        );
+                        if (confirm == true && context.mounted) {
+                          await ref
+                              .read(authStateProvider.notifier)
+                              .logout();
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.1),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: const Icon(Icons.logout_rounded,
+                            size: 18, color: AppTheme.textSecondary),
+                      ),
+                    ),
                   ],
                 ),
               ),

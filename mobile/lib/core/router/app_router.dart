@@ -6,16 +6,19 @@ import '../models/user_model.dart';
 import '../providers/auth_provider.dart';
 import '../providers/auth_state.dart';
 import '../theme/app_theme.dart';
-import '../../features/auth/screens/phone_input_screen.dart';
-import '../../features/auth/screens/otp_verify_screen.dart';
-import '../../features/auth/screens/profile_setup_screen.dart';
+import '../../features/auth/screens/welcome_screen.dart';
+import '../../features/auth/screens/login_screen.dart';
+import '../../features/auth/screens/photo_capture_screen.dart';
+import '../../features/auth/screens/registration_details_screen.dart';
 import '../../features/verification/screens/consent_screen.dart';
 import '../../features/verification/screens/face_register_screen.dart';
 import '../../features/verification/screens/pre_ride_face_screen.dart';
 import '../../features/verification/screens/verification_status_screen.dart';
 import '../../features/ride/screens/passenger_home_screen.dart';
 import '../../features/ride/screens/active_ride_screen.dart';
+import '../../features/ride/screens/otp_entry_screen.dart';
 import '../../features/safety/screens/emergency_contacts_screen.dart';
+import '../../features/safety/screens/sos_screen.dart';
 import '../../features/payment/screens/payment_screen.dart';
 import '../../features/payment/screens/rating_screen.dart';
 import '../../features/payment/screens/wallet_screen.dart';
@@ -27,66 +30,64 @@ import '../../features/driver/screens/driver_register_screen.dart';
 import '../../features/driver/screens/driver_status_screen.dart';
 
 /// Route path constants — single source of truth for all navigation.
-/// Use these everywhere instead of raw strings like '/auth/phone'.
 class AppRoutes {
   AppRoutes._();
 
-  // Auth
-  static const String splash = '/';
-  static const String phoneInput = '/auth/phone';
-  static const String otpVerify = '/auth/otp';
-  static const String profileSetup = '/auth/profile';
+  // ── Auth / Onboarding ─────────────────────────────────────────────────────
+  static const String splash               = '/';
+  static const String welcome              = '/welcome';         // landing page
+  static const String login                = '/auth/login';      // returning users
+  static const String signUp               = '/auth/signup';     // new users
+  // Legacy routes kept for back-compat
+  static const String phoneInput           = '/auth/phone';
+  static const String otpVerify            = '/auth/otp';
+  static const String photoCapture         = '/auth/photo';
+  static const String registrationDetails  = '/auth/register';
+  static const String profileSetup         = '/auth/profile';
 
-  // Face verification
-  static const String faceConsent = '/verification/consent';
-  static const String faceRegister = '/verification/register';
+  // ── Face verification ─────────────────────────────────────────────────────
+  static const String faceConsent       = '/verification/consent';
+  static const String faceRegister      = '/verification/register';
   static const String verificationStatus = '/verification/status';
-  static const String preRideFace = '/verification/ride-face';
+  static const String preRideFace       = '/verification/ride-face';
 
-  // Ride OTP entry (after pre-ride face check)
-  static const String otpEntry = '/ride/otp';
-
-  // Passenger
+  // ── Ride ──────────────────────────────────────────────────────────────────
+  static const String otpEntry     = '/ride/otp';
   static const String passengerHome = '/passenger/home';
-  static const String bookRide = '/passenger/book';
-  static const String activeRide = '/passenger/ride/:rideId';
+  static const String bookRide     = '/passenger/book';
+  static const String activeRide   = '/passenger/ride/:rideId';
 
-  // Driver
-  static const String driverHome = '/driver/home';
+  // ── Driver ────────────────────────────────────────────────────────────────
+  static const String driverHome     = '/driver/home';
   static const String driverRegister = '/driver/register';
-  static const String driverStatus = '/driver/status';
+  static const String driverStatus   = '/driver/status';
 
-  // Safety
-  static const String sos = '/safety/sos';
+  // ── Safety ────────────────────────────────────────────────────────────────
+  static const String sos               = '/safety/sos';
   static const String emergencyContacts = '/safety/contacts';
 
-  // Payment
-  static const String payment = '/payment/:rideId';
-  static const String rating = '/rating/:rideId';
-  static const String wallet = '/wallet';
+  // ── Ride OTP (driver entry + passenger display) ───────────────────────────
+  static const String rideOtpDisplay = '/ride/otp-display';
 
-  // Admin
-  static const String adminHome = '/admin/home';
+  // ── Payment ───────────────────────────────────────────────────────────────
+  static const String payment = '/payment/:rideId';
+  static const String rating  = '/rating/:rideId';
+  static const String wallet  = '/wallet';
+
+  // ── Admin ──────────────────────────────────────────────────────────────────
+  static const String adminHome        = '/admin/home';
   static const String adminDriverDetail = '/admin/driver/:driverId';
 }
 
-/// appRouterProvider — the go_router instance wired to AuthState.
+/// Router provider — GoRouter wired to AuthState via RouterNotifier.
 ///
-/// HOW go_router REDIRECT WORKS:
-/// Every time the user navigates (or the app starts), go_router calls
-/// the `redirect` callback. We check the current AuthState and decide:
-///
-///   AuthLoading     → stay on splash (wait for session check)
-///   Unauthenticated → send to /auth/phone (unless already there)
-///   Authenticated   → send to correct home screen based on role
-///                     (unless already on a valid screen for that role)
-///
-/// WHY ref.listen AND routerKey?
-/// go_router doesn't automatically re-evaluate the redirect when Riverpod
-/// state changes. We use a [RouterNotifier] that listens to authStateProvider
-/// and calls GoRouter.refresh() whenever the session changes —
-/// which triggers the redirect to re-run.
-/// This is the standard go_router + Riverpod pattern.
+/// REDIRECT LOGIC:
+///   AuthLoading        → splash (wait)
+///   AuthUnauthenticated → /auth/phone (unless already in /auth/*)
+///   AuthAuthenticated + incomplete profile
+///                      → /auth/photo  (new user onboarding, unless already in /auth/*)
+///   AuthAuthenticated + complete profile + on splash/auth
+///                      → role home screen
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final notifier = RouterNotifier(ref);
@@ -96,183 +97,221 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     refreshListenable: notifier,
     redirect: (context, state) {
       final authState = ref.read(authStateProvider);
-      final location = state.matchedLocation;
+      final location  = state.matchedLocation;
 
-      // Still checking storage — stay on splash
+      // ── Still loading ──────────────────────────────────────────────────────
       if (authState is AuthLoading) {
         return location == AppRoutes.splash ? null : AppRoutes.splash;
       }
 
-      // Not logged in — send to phone input unless already in auth flow
+      // ── Not logged in ──────────────────────────────────────────────────────
+      // Allow any /auth/* route (login, signup, photo, register).
+      // Splash / everything else → welcome screen.
       if (authState is AuthUnauthenticated) {
-        final inAuthFlow = location.startsWith('/auth');
-        return inAuthFlow ? null : AppRoutes.phoneInput;
+        if (location.startsWith('/auth') || location == AppRoutes.welcome) {
+          return null;
+        }
+        return AppRoutes.welcome;
       }
 
-      // Logged in — redirect from splash/auth pages to correct home
+      // ── Logged in ──────────────────────────────────────────────────────────
       if (authState is AuthAuthenticated) {
         final user = authState.user;
 
-        // Profile incomplete — name or role not set yet.
-        // Always redirect to profile setup UNLESS already there.
-        // This check runs before anything else so no incomplete-profile user
-        // can ever land on a feature screen.
         final profileIncomplete =
             (user.fullName == null || user.fullName!.trim().isEmpty) ||
             user.role == UserRole.unknown;
 
         if (profileIncomplete) {
-          // Already on profile setup — stay there, don't loop
-          return location == AppRoutes.profileSetup ? null : AppRoutes.profileSetup;
+          // Mid-onboarding — allow /auth/* so photo+register screens work
+          return location.startsWith('/auth') ? null : AppRoutes.photoCapture;
         }
 
-        // Profile complete — redirect splash/auth pages to the right home
-        final onSplashOrAuth =
-            location == AppRoutes.splash || location.startsWith('/auth');
+        // Profile complete — leave feature screens alone, redirect away from auth/splash
+        final onSplashOrWelcomeOrAuth =
+            location == AppRoutes.splash ||
+            location == AppRoutes.welcome ||
+            location.startsWith('/auth');
 
-        if (onSplashOrAuth) {
+        if (onSplashOrWelcomeOrAuth) {
           if (user.isAdmin) return AppRoutes.adminHome;
           if (user.isDriver) return AppRoutes.driverHome;
           return AppRoutes.passengerHome;
         }
       }
 
-      // No redirect needed
       return null;
     },
     routes: [
-      // ── Splash ────────────────────────────────────────────────────────────
+      // ── Splash (loading state only) ──────────────────────────────────────
       GoRoute(
         path: AppRoutes.splash,
-        builder: (context, state) => const SplashScreen(),
+        builder: (_, __) => const SplashScreen(),
       ),
 
-      // ── Auth ──────────────────────────────────────────────────────────────
+      // ── Welcome ───────────────────────────────────────────────────────────
       GoRoute(
-        path: AppRoutes.phoneInput,
-        builder: (context, state) => const PhoneInputScreen(),
+        path: AppRoutes.welcome,
+        builder: (_, __) => const WelcomeScreen(),
       ),
+
+      // ── Login (returning users) ───────────────────────────────────────────
       GoRoute(
-        path: AppRoutes.otpVerify,
-        builder: (context, state) {
-          // OtpVerifyScreen needs phone + countryCode passed from PhoneInputScreen.
-          // go_router passes arbitrary objects via state.extra.
-          // We cast it here and fall back to empty strings if somehow missing.
+        path: AppRoutes.login,
+        builder: (_, __) => const LoginScreen(),
+      ),
+
+      // ── Sign Up (new users) ───────────────────────────────────────────────
+      GoRoute(
+        path: AppRoutes.signUp,
+        builder: (_, __) => const SignUpScreen(),
+      ),
+
+      // ── New-user onboarding ───────────────────────────────────────────────
+      GoRoute(
+        path: AppRoutes.photoCapture,
+        builder: (_, state) {
           final extra = state.extra as Map<String, dynamic>? ?? {};
-          return OtpVerifyScreen(
-            phone: extra['phone'] as String? ?? '',
-            countryCode: extra['countryCode'] as String? ?? '+91',
-          );
+          return PhotoCaptureScreen(phone: extra['phone'] as String? ?? '');
         },
       ),
       GoRoute(
-        path: AppRoutes.profileSetup,
-        builder: (context, state) => const ProfileSetupScreen(),
+        path: AppRoutes.registrationDetails,
+        builder: (_, state) {
+          final extra = state.extra as Map<String, dynamic>? ?? {};
+          return RegistrationDetailsScreen(phone: extra['phone'] as String? ?? '');
+        },
       ),
+      // Legacy redirects
+      GoRoute(path: AppRoutes.phoneInput,  redirect: (_, __) => AppRoutes.welcome),
+      GoRoute(path: AppRoutes.otpVerify,   redirect: (_, __) => AppRoutes.welcome),
+      GoRoute(path: AppRoutes.profileSetup, redirect: (_, __) => AppRoutes.signUp),
 
-      // ── Verification (Task 4) ─────────────────────────────────────────────
+      // ── Verification ──────────────────────────────────────────────────────
       GoRoute(
         path: AppRoutes.faceConsent,
-        builder: (context, state) => const ConsentScreen(),
+        builder: (_, __) => const ConsentScreen(),
       ),
       GoRoute(
         path: AppRoutes.faceRegister,
-        builder: (context, state) => const FaceRegisterScreen(),
+        builder: (_, __) => const FaceRegisterScreen(),
       ),
       GoRoute(
         path: AppRoutes.verificationStatus,
-        builder: (context, state) => const VerificationStatusScreen(),
+        builder: (_, __) => const VerificationStatusScreen(),
       ),
       GoRoute(
         path: AppRoutes.preRideFace,
-        builder: (context, state) {
+        builder: (_, state) {
           final extra = state.extra as Map<String, dynamic>? ?? {};
           return PreRideFaceScreen(
             ridePassengerId: extra['ridePassengerId'] as String? ?? '',
-            rideId: extra['rideId'] as String? ?? '',
+            rideId:          extra['rideId']          as String? ?? '',
           );
         },
       ),
-      // OTP entry after face check — placeholder until Task 6 (active ride)
+      // OTP entry — driver enters the passenger's OTP to start the trip
       GoRoute(
         path: AppRoutes.otpEntry,
-        builder: (context, state) => const _PlaceholderScreen('OTP Entry'),
+        builder: (_, state) {
+          final extra = state.extra as Map<String, dynamic>? ?? {};
+          final rideId = extra['rideId'] as String? ?? '';
+          return OtpEntryScreen(rideId: rideId);
+        },
       ),
 
-      // ── Passenger (Task 5) ────────────────────────────────────────────────
+      // OTP display — passenger sees the OTP after face check
+      GoRoute(
+        path: AppRoutes.rideOtpDisplay,
+        builder: (_, state) {
+          final extra = state.extra as Map<String, dynamic>? ?? {};
+          return RideOtpDisplayScreen(
+            ridePassengerId: extra['ridePassengerId'] as String? ?? '',
+            rideId:          extra['rideId']          as String? ?? '',
+            otp:             extra['otp']              as String? ?? '------',
+          );
+        },
+      ),
+
+      // ── Passenger ─────────────────────────────────────────────────────────
       GoRoute(
         path: AppRoutes.passengerHome,
-        builder: (context, state) => const PassengerHomeScreen(),
+        builder: (_, __) => const PassengerHomeScreen(),
       ),
       GoRoute(
         path: AppRoutes.activeRide,
-        builder: (context, state) => ActiveRideScreen(
+        builder: (_, state) => ActiveRideScreen(
           rideId: state.pathParameters['rideId'] ?? '',
         ),
       ),
 
-      // ── Safety (Task 7) ───────────────────────────────────────────────────
+      // ── Safety ────────────────────────────────────────────────────────────
+      GoRoute(
+        path: AppRoutes.sos,
+        builder: (_, state) {
+          final extra = state.extra as Map<String, dynamic>? ?? {};
+          return SosScreen(rideId: extra['rideId'] as String? ?? '');
+        },
+      ),
       GoRoute(
         path: AppRoutes.emergencyContacts,
-        builder: (context, state) => const EmergencyContactsScreen(),
+        builder: (_, __) => const EmergencyContactsScreen(),
       ),
 
-      // ── Payment (Task 9) ──────────────────────────────────────────────────
+      // ── Payment ───────────────────────────────────────────────────────────
       GoRoute(
         path: AppRoutes.payment,
-        builder: (context, state) {
+        builder: (_, state) {
           final extra = state.extra as Map<String, dynamic>? ?? {};
           return PaymentScreen(
-            rideId: state.pathParameters['rideId'] ?? '',
+            rideId:        state.pathParameters['rideId'] ?? '',
             paymentMethod: extra['paymentMethod'] as String? ?? 'cash',
-            amount: (extra['amount'] as num?)?.toDouble() ?? 0,
+            amount:        (extra['amount'] as num?)?.toDouble() ?? 0,
           );
         },
       ),
       GoRoute(
         path: AppRoutes.rating,
-        builder: (context, state) => RatingScreen(
+        builder: (_, state) => RatingScreen(
           rideId: state.pathParameters['rideId'] ?? '',
         ),
       ),
       GoRoute(
         path: AppRoutes.wallet,
-        builder: (context, state) => const WalletScreen(),
+        builder: (_, __) => const WalletScreen(),
       ),
 
-      // ── Driver (Task 8) ───────────────────────────────────────────────────
+      // ── Driver ────────────────────────────────────────────────────────────
       GoRoute(
         path: AppRoutes.driverHome,
-        builder: (context, state) => const DriverHomeScreen(),
+        builder: (_, __) => const DriverHomeScreen(),
       ),
       GoRoute(
         path: AppRoutes.driverRegister,
-        builder: (context, state) => const DriverRegisterScreen(),
+        builder: (_, __) => const DriverRegisterScreen(),
       ),
       GoRoute(
         path: AppRoutes.driverStatus,
-        builder: (context, state) => const DriverStatusScreen(),
+        builder: (_, __) => const DriverStatusScreen(),
       ),
 
-      // ── Admin (Task 10) ───────────────────────────────────────────────────
+      // ── Admin ──────────────────────────────────────────────────────────────
       GoRoute(
         path: AppRoutes.adminHome,
-        builder: (context, state) => const DriverQueueScreen(),
+        builder: (_, __) => const DriverQueueScreen(),
       ),
       GoRoute(
         path: AppRoutes.adminDriverDetail,
-        builder: (context, state) {
+        builder: (_, state) {
           final driver = state.extra as DriverQueueItem?;
-          if (driver == null) {
-            return const _PlaceholderScreen('Driver Detail');
-          }
-          return DriverDetailScreen(driver: driver);
+          return driver != null
+              ? DriverDetailScreen(driver: driver)
+              : const _PlaceholderScreen('Driver Detail');
         },
       ),
     ],
 
-    // Error page — shown if navigation to a non-existent route is attempted
-    errorBuilder: (context, state) => Scaffold(
+    errorBuilder: (_, state) => Scaffold(
       body: Center(
         child: Text(
           'Page not found: ${state.matchedLocation}',
@@ -283,25 +322,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   );
 });
 
-/// RouterNotifier — bridges Riverpod state changes to go_router.
-///
-/// go_router's refreshListenable accepts a Listenable.
-/// This class listens to authStateProvider and notifies go_router
-/// whenever the session state changes, triggering a redirect re-evaluation.
+/// Bridges Riverpod auth state changes → GoRouter redirect re-evaluation.
 class RouterNotifier extends ChangeNotifier {
   RouterNotifier(Ref ref) {
-    // Listen to auth state changes and notify go_router
-    ref.listen<AuthState>(
-      authStateProvider,
-      (_, __) => notifyListeners(),
-    );
+    ref.listen<AuthState>(authStateProvider, (_, __) => notifyListeners());
   }
 }
 
-// ── Screens ───────────────────────────────────────────────────────────────────
-
-/// Splash screen — shown while AuthStateNotifier checks secure storage.
-/// Replaced with a branded animation in a later polish pass.
+// ── Splash screen ─────────────────────────────────────────────────────────────
 class SplashScreen extends StatelessWidget {
   const SplashScreen({super.key});
 
@@ -347,8 +375,7 @@ class SplashScreen extends StatelessWidget {
   }
 }
 
-/// Placeholder screen used for routes not yet implemented.
-/// Each task replaces these with the real screen.
+/// Placeholder for routes not yet fully implemented.
 class _PlaceholderScreen extends StatelessWidget {
   final String name;
   const _PlaceholderScreen(this.name);
@@ -359,12 +386,9 @@ class _PlaceholderScreen extends StatelessWidget {
       appBar: AppBar(title: Text(name)),
       body: Center(
         child: Text(
-          '$name\n(Coming in a future task)',
+          '$name\n(Coming soon)',
           textAlign: TextAlign.center,
-          style: const TextStyle(
-            color: AppTheme.textSecondary,
-            fontSize: 16,
-          ),
+          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 16),
         ),
       ),
     );

@@ -1,15 +1,3 @@
--- ============================================================
--- PinkRide Database Schema
--- Run this in Supabase SQL Editor to set up your database
--- Project: PinkRide MVP — Jaipur
--- ============================================================
-
--- ============================================================
--- ENUMS
--- Supabase supports native Postgres enums.
--- Create these FIRST before any tables that use them.
--- ============================================================
-
 CREATE TYPE user_role AS ENUM ('passenger', 'driver', 'admin');
 CREATE TYPE user_gender AS ENUM ('female', 'male', 'other', 'prefer_not_to_say');
 CREATE TYPE driver_approval_status AS ENUM ('pending', 'under_review', 'approved', 'rejected', 'suspended');
@@ -62,14 +50,15 @@ CREATE TABLE users (
 
   -- Face verification (no raw photo stored — only a reference ID)
   face_embedding_ref    TEXT,
-  face_verified         BOOLEAN NOT NULL DEFAULT FALSE,
-  face_consent_given    BOOLEAN NOT NULL DEFAULT FALSE,
-  face_consent_given_at TIMESTAMPTZ,
-
-  -- Account state
-  is_active             BOOLEAN NOT NULL DEFAULT TRUE,
-  is_phone_verified     BOOLEAN NOT NULL DEFAULT FALSE,
-
+CREATE TABLE users (
+  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  phone                 VARCHAR(15) UNIQUE NOT NULL,
+  country_code          VARCHAR(5) NOT NULL DEFAULT '+91',
+  email                 VARCHAR(255) UNIQUE,
+  role                  user_role NOT NULL DEFAULT 'passenger',
+  full_name             VARCHAR(100),
+  gender                user_gender,
+  date_of_birth         DATE,
   -- Trust & reliability
   reliability_score     NUMERIC(3,2) NOT NULL DEFAULT 5.00,
   total_rides           INTEGER NOT NULL DEFAULT 0,

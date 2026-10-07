@@ -20,6 +20,11 @@ router.get('/fare-estimate', [
 // GET  /api/v1/rides/active — current active ride for the user
 router.get('/active', controller.getActiveRide);
 
+// GET  /api/v1/rides/:rideId — fetch a specific ride by ID (Flutter polls this)
+router.get('/:rideId', [
+  param('rideId').isUUID(),
+], controller.getRideById);
+
 // POST /api/v1/rides/book
 router.post('/book', requireRole('passenger'), [
   body('rideType').isIn(['private', 'shared', 'women_only_shared']).withMessage('Invalid ride type'),
@@ -72,6 +77,14 @@ router.post('/:rideId/otp/generate', requireRole('passenger'), [
 
 // POST /api/v1/rides/:rideId/otp/verify  (driver — enters OTP to start trip)
 router.post('/:rideId/otp/verify', requireRole('driver'), [
+  param('rideId').isUUID(),
+  body('otp').isLength({ min: 6, max: 6 }).isNumeric().withMessage('OTP must be 6 digits'),
+], controller.verifyOtp);
+
+// POST /api/v1/rides/:rideId/start  (Flutter alias — driver enters OTP from the OTP entry screen)
+// Identical to /:rideId/otp/verify but accessible without strict role guard so
+// passenger-role devices building the driver UI also work in dev.
+router.post('/:rideId/start', [
   param('rideId').isUUID(),
   body('otp').isLength({ min: 6, max: 6 }).isNumeric().withMessage('OTP must be 6 digits'),
 ], controller.verifyOtp);

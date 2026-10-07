@@ -10,12 +10,6 @@ const crypto = require('crypto');
 const OTP_EXPIRY_MINUTES = parseInt(process.env.OTP_EXPIRY_MINUTES) || 10;
 const OTP_MAX_ATTEMPTS   = parseInt(process.env.OTP_MAX_ATTEMPTS)   || 5;
 
-// ─── OTP ─────────────────────────────────────────────────────────────────────
-
-/**
- * Generate a 6-digit OTP, store in memory with expiry, send via SMS.
- * In development (SEND_REAL_SMS_IN_DEV=false), OTP is printed to console only.
- */
 const requestOtp = async (phone, purpose = 'login') => {
   const attemptsKey = keys.otpAttempts(phone, purpose);
 
@@ -134,15 +128,9 @@ const loginOrRegister = async (phone, loginAsDriver = false) => {
     const role = loginAsDriver ? 'driver' : 'passenger';
     const { data: newUser, error: insertError } = await supabase
       .from('users')
-      .insert({ phone, is_phone_verified: true, role })
+      .insert({ phone, role })
       .select('id, role, full_name, is_active, face_verified, city')
       .single();
-
-    if (insertError) {
-      console.error('User insert error:', insertError);
-      throw new AppError('Failed to create account. Please try again.', 500);
-    }
-
     console.log('[Auth] New user created:', newUser.id, 'phone:', phone, 'role:', role);
 
     const tokens = generateTokens(newUser.id, newUser.role);

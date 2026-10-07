@@ -1,6 +1,7 @@
 const { supabase } = require('../../shared/db/client');
 const { AppError } = require('../../shared/middleware/errorHandler');
-const { emitToRide } = require('../../shared/socket/socket.server');
+// Lazy-required to break circular dependency: safety → socket → safety
+const getSocket = () => require('../../shared/socket/socket.server');
 const { sendEmergencyAlert } = require('../notification/sms.service');
 
 /**
@@ -25,7 +26,7 @@ const triggerSOS = async (passengerId, rideId, lat, lng) => {
     : 'Location unavailable';
 
   // Broadcast to everyone in the ride room immediately
-  emitToRide(rideId, 'sos_alert', {
+  getSocket().emitToRide(rideId, 'sos_alert', {
     triggeredBy: passengerId,
     passengerName,
     rideId,
@@ -86,7 +87,7 @@ const safetyCheckIn = async (passengerId, rideId) => {
     .eq('ride_id', rideId)
     .in('status', ['detected', 'passenger_acknowledged']);
 
-  emitToRide(rideId, 'safety_check_in', {
+  getSocket().emitToRide(rideId, 'safety_check_in', {
     passengerId,
     timestamp: Date.now(),
     message: 'Passenger confirmed safe.',

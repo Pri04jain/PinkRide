@@ -1,0 +1,10 @@
+{
+  "name": "pinkride-backend",
+  "version": "1.0.0",
+  "description": "PinkRide backend — runs from the repo root (../src)",
+  "scripts": {
+    "start": "node ../src/app.js",
+    "dev":   "nodemon ../src/app.js"
+  },
+  "note": "Dependencies and .env live in the parent directory (PinkRide/). Run 'npm install' from PinkRide/ not here."
+}

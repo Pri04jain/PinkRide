@@ -1,0 +1,30 @@
+# Flutter / Dart build outputs
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+build/
+*.iml
+
+# Android generated files
+android/.gradle/
+android/app/src/main/java/
+android/app/src/main/kotlin/
+android/app/src/main/res/
+android/build/
+android/gradle/wrapper/gradle-wrapper.jar
+android/gradlew
+android/gradlew.bat
+android/local.properties
+
+# iOS generated files
+ios/Flutter/
+ios/Runner/GeneratedPluginRegistrant.h
+ios/Runner/GeneratedPluginRegistrant.m
+ios/Pods/
+ios/.symlinks/
+
+# macOS
+.DS_Store
+
+# Environment
+.env

@@ -408,6 +408,7 @@ class ActiveRideNotifier extends StateNotifier<ActiveRideState> {
   // Immediately fetches once, then polls every 5 seconds.
 
   void startTracking(String rideId) {
+    if (rideId.isEmpty) return; // never poll with an empty ID → avoids GET /rides/
     _rideId = rideId;
     _fetchRide(); // immediate first fetch
     _pollingTimer?.cancel();

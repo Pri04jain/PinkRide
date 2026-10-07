@@ -113,7 +113,7 @@ class DriverService {
   // On success: ride is assigned to this driver, passengers notified via FCM.
 
   Future<void> acceptRide(String rideId) async {
-    await _api.post(ApiEndpoints.acceptRide(rideId));
+    await _api.post(ApiEndpoints.acceptRideById(rideId));
   }
 }
 

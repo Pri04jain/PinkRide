@@ -1,7 +1,8 @@
 const { supabase } = require('../../shared/db/client');
 const { otpStore } = require('../../shared/cache/otpStore');
 const { AppError } = require('../../shared/middleware/errorHandler');
-const { emitToRide } = require('../../shared/socket/socket.server');
+// Lazy-required to break circular dependency: socket.server → tracking → socket.server
+const getSocket = () => require('../../shared/socket/socket.server');
 
 const DEVIATION_ALERT_METERS = parseFloat(process.env.ROUTE_DEVIATION_ALERT_METERS) || 500;
 const AUTO_ALERT_SECONDS = parseInt(process.env.ROUTE_DEVIATION_AUTO_ALERT_SECONDS) || 120;
@@ -189,7 +190,7 @@ const _handleDeviation = async (rideId, driverUserId, lat, lng, deviationMeters)
   const deviationId = deviationRecord.id;
 
   // Emit real-time alert to passenger
-  emitToRide(rideId, 'route_deviation', {
+  getSocket().emitToRide(rideId, 'route_deviation', {
     deviationId,
     deviationMeters: Math.round(deviationMeters),
     currentLat: lat,
@@ -258,7 +259,7 @@ const _autoAlertContacts = async (rideId, deviationId, lat, lng) => {
     .update({ contacts_alerted_at: new Date().toISOString(), status: 'contacts_alerted' })
     .eq('id', deviationId);
 
-  emitToRide(rideId, 'contacts_alerted', { deviationId, reason: 'no_response' });
+  getSocket().emitToRide(rideId, 'contacts_alerted', { deviationId, reason: 'no_response' });
 };
 
 const _alertContactsForDeviation = async (deviationId, passengerId) => {

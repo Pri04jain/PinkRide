@@ -8,26 +8,39 @@ const MIN_TOPUP = parseInt(process.env.WALLET_MIN_TOPUP_INR) || 100;
  * Auto-records face consent so user can proceed to face verification
  */
 const completeRegistration = async (userId, profileData) => {
-  const { fullName, gender, dateOfBirth, role = 'passenger' } = profileData;
+  const { fullName, gender, dateOfBirth, role = 'passenger', email, profilePhotoUrl } = profileData;
 
   if (!['passenger', 'driver'].includes(role)) {
     throw new AppError('Invalid role specified', 400);
   }
 
+  // Check email uniqueness if provided
+  if (email) {
+    const { data: existing } = await supabase
+      .from('users')
+      .select('id')
+      .eq('email', email)
+      .neq('id', userId)
+      .maybeSingle();
+    if (existing) throw new AppError('This email is already linked to another account.', 409);
+  }
+
+  const updateFields = {
+    full_name: fullName,
+    gender,
+    date_of_birth: dateOfBirth || null,
+    role,
+    face_consent_given: true,
+    face_consent_given_at: new Date().toISOString(),
+  };
+  if (email)           updateFields.email = email.toLowerCase().trim();
+  if (profilePhotoUrl) updateFields.profile_photo_url = profilePhotoUrl;
+
   const { data, error } = await supabase
     .from('users')
-    .update({
-      full_name: fullName,
-      gender,
-      date_of_birth: dateOfBirth || null,
-      role,
-      // Auto-record face consent during registration (DPDP compliance)
-      // User gets presented with consent during profile completion
-      face_consent_given: true,
-      face_consent_given_at: new Date().toISOString(),
-    })
+    .update(updateFields)
     .eq('id', userId)
-    .select('id, phone, full_name, gender, role, city, face_verified, face_consent_given, reliability_score, wallet_balance, created_at')
+    .select('id, phone, email, full_name, gender, role, city, profile_photo_url, face_verified, face_consent_given, reliability_score, wallet_balance, created_at')
     .single();
 
   if (error || !data) throw new AppError('User not found', 404);
@@ -40,7 +53,7 @@ const completeRegistration = async (userId, profileData) => {
 const getProfile = async (userId) => {
   const { data: user, error } = await supabase
     .from('users')
-    .select('id, phone, full_name, gender, role, city, face_verified, reliability_score, wallet_balance, total_rides, cancellation_count, created_at, last_active_at')
+    .select('id, phone, email, full_name, gender, role, city, profile_photo_url, face_verified, reliability_score, wallet_balance, total_rides, cancellation_count, created_at, last_active_at')
     .eq('id', userId)
     .single();
 
@@ -63,10 +76,12 @@ const getProfile = async (userId) => {
  * Update user profile (limited fields)
  */
 const updateProfile = async (userId, updates) => {
-  const allowed = ['full_name', 'date_of_birth', 'profile_photo_url'];
+  const allowed = ['full_name', 'date_of_birth', 'profile_photo_url', 'email'];
   const filtered = Object.fromEntries(
     Object.entries(updates).filter(([k]) => allowed.includes(k))
   );
+  // Normalise email if provided
+  if (filtered.email) filtered.email = filtered.email.toLowerCase().trim();
 
   if (!Object.keys(filtered).length) throw new AppError('No valid fields to update', 400);
 
@@ -74,7 +89,7 @@ const updateProfile = async (userId, updates) => {
     .from('users')
     .update(filtered)
     .eq('id', userId)
-    .select('id, full_name, gender, role, city, reliability_score')
+    .select('id, phone, email, full_name, gender, role, city, profile_photo_url, reliability_score')
     .single();
 
   if (error) throw new AppError('Update failed', 500);

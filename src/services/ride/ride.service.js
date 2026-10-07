@@ -405,7 +405,7 @@ const getActiveRide = async (userId) => {
         drivers(
           vehicle_make, vehicle_model, vehicle_number, vehicle_color,
           current_lat, current_lng,
-          users!inner(full_name, phone)
+          users!drivers_user_id_fkey(full_name, phone)
         )
       )
     `)
@@ -415,8 +415,9 @@ const getActiveRide = async (userId) => {
     .limit(1)
     .single();
 
-  if (error) return null;
-  return data;
+  if (error || !data) return null;
+  // Flatten: return rides object directly for Flutter
+  return data.rides;
 };
 
 const getDriverActiveRide = async (driverUserId) => {
@@ -480,6 +481,55 @@ const _notifyNearbyDrivers = async (city, pickupAddress, fareAmount) => {
   );
 };
 
+// ─── Get Ride By ID ───────────────────────────────────────────────────────────
+// Used by Flutter to poll ride status. Validates the user is a participant.
+
+const getRideById = async (rideId, userId) => {
+  const { data: ride, error } = await supabase
+    .from('rides')
+    .select(`
+      id, status, ride_type, pickup_address, drop_address,
+      base_fare, platform_fee, final_fare, payment_method, payment_status,
+      scheduled_at, started_at, ended_at,
+      drivers (
+        id,
+        vehicle_number, vehicle_make, vehicle_model, vehicle_color,
+        users!drivers_user_id_fkey ( id, full_name, phone, profile_photo_url )
+      ),
+      ride_passengers ( passenger_id, total_fare, status )
+    `)
+    .eq('id', rideId)
+    .single();
+
+  if (error || !ride) throw new AppError('Ride not found.', 404);
+
+  // Verify the requester is the driver or a passenger on this ride
+  const isDriver = ride.drivers?.users?.id === userId;
+  const isPassenger = (ride.ride_passengers || []).some((rp) => rp.passenger_id === userId);
+  if (!isDriver && !isPassenger) throw new AppError('Access denied.', 403);
+
+  return {
+    id:             ride.id,
+    status:         ride.status,
+    ride_type:      ride.ride_type,
+    pickup_address: ride.pickup_address,
+    drop_address:   ride.drop_address,
+    final_fare:     ride.final_fare ?? ride.base_fare,
+    payment_method: ride.payment_method,
+    payment_status: ride.payment_status,
+    scheduled_at:   ride.scheduled_at,
+    started_at:     ride.started_at,
+    ended_at:       ride.ended_at,
+    driver_id:      ride.drivers?.users?.id ?? null,
+    driver_name:    ride.drivers?.users?.full_name ?? null,
+    driver_phone:   ride.drivers?.users?.phone ?? null,
+    vehicle_number: ride.drivers?.vehicle_number ?? null,
+    vehicle_info:   ride.drivers
+      ? `${ride.drivers.vehicle_make} ${ride.drivers.vehicle_model} \u2022 ${ride.drivers.vehicle_color}`
+      : null,
+  };
+};
+
 module.exports = {
   bookRide,
   findMatch,
@@ -490,4 +540,5 @@ module.exports = {
   getActiveRide,
   getDriverActiveRide,
   getFareEstimate,
+  getRideById,
 };

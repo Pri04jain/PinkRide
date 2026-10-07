@@ -87,6 +87,15 @@ const getActiveRide = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const getRideById = async (req, res, next) => {
+  try {
+    const errs = validationResult(req);
+    if (!errs.isEmpty()) return error(res, 'Validation failed', 422, errs.array());
+    const ride = await rideService.getRideById(req.params.rideId, req.user.id);
+    return success(res, { ride });
+  } catch (err) { next(err); }
+};
+
 const generateOtp = async (req, res, next) => {
   try {
     const result = await otpService.generateRideOtp(req.params.rideId, req.user.id);
@@ -113,5 +122,5 @@ const completeRide = async (req, res, next) => {
 module.exports = {
   bookRide, getFareEstimate, findMatch, respondToMatch,
   proposeTimeShift, respondToTimeShift, cancelRide,
-  getActiveRide, generateOtp, verifyOtp, completeRide,
+  getActiveRide, getRideById, generateOtp, verifyOtp, completeRide,
 };

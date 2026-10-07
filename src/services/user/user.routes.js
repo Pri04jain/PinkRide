@@ -14,6 +14,8 @@ router.post('/register', [
   body('gender').isIn(['female', 'male', 'other', 'prefer_not_to_say']).withMessage('Invalid gender'),
   body('role').optional().isIn(['passenger', 'driver']).withMessage('Invalid role'),
   body('dateOfBirth').optional().isDate().withMessage('Invalid date of birth'),
+  body('email').optional().isEmail().normalizeEmail().withMessage('Invalid email address'),
+  body('profilePhotoUrl').optional().isURL().withMessage('Invalid photo URL'),
 ], controller.completeRegistration);
 
 // POST /api/v1/users/face-consent — record DPDP consent before face verification
@@ -41,6 +43,9 @@ router.post('/emergency-contacts', [
 router.delete('/emergency-contacts/:contactId', [
   param('contactId').isUUID().withMessage('Invalid contact ID'),
 ], controller.deleteEmergencyContact);
+
+// GET /api/v1/users/wallet — balance + recent transactions (Flutter wallet screen)
+router.get('/wallet', controller.getWallet);
 
 // Wallet — two-step Razorpay-verified top-up
 // Step 1: POST /api/v1/users/wallet/topup/order  → get Razorpay order

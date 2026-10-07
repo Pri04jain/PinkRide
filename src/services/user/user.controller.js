@@ -3,6 +3,17 @@ const userService = require('./user.service');
 const paymentService = require('../payment/payment.service');
 const { success, created, error } = require('../../shared/utils/response');
 
+// Wallet — delegates to payment service (same data, different URL for Flutter)
+const getWallet = async (req, res, next) => {
+  try {
+    const [balance, transactions] = await Promise.all([
+      paymentService.getWalletBalance(req.user.id),
+      paymentService.getWalletTransactions(req.user.id),
+    ]);
+    return success(res, { balance, transactions });
+  } catch (err) { next(err); }
+};
+
 const completeRegistration = async (req, res, next) => {
   try {
     const errors = validationResult(req);
@@ -90,5 +101,5 @@ const deleteAccount = async (req, res, next) => {
 module.exports = {
   completeRegistration, recordFaceConsent, getProfile, updateProfile,
   addEmergencyContact, getEmergencyContacts, deleteEmergencyContact,
-  createWalletTopupOrder, verifyWalletTopup, deleteAccount,
+  createWalletTopupOrder, verifyWalletTopup, deleteAccount, getWallet,
 };
